@@ -34,7 +34,7 @@
 #include "task.h"
 #include "queue.h"
 
-#define LSM6DS3_ADDR		(0x6A)
+#define LSM6DS3_ADDR		(0x6B)
 #define TMP102_ADDR			(0x48)
 
 
@@ -49,46 +49,45 @@ void I2C_Init(void)
 {
 	// The I2C2 peripheral must be enabled before use.
 	// On GPIO PortL
-	ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOL);
+	ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOG);
 
 	//
 	// Wait for the Peripheral to be ready for programming
 	//
-	while(!ROM_SysCtlPeripheralReady(SYSCTL_PERIPH_GPIOL));
+	while(!ROM_SysCtlPeripheralReady(SYSCTL_PERIPH_GPIOG));
 
 	//
 	// Configure the pin muxing for I2C2 functions on port L0 and L1.
 	// This step is not necessary if your part does not support pin muxing.
 	//
-	ROM_GPIOPinConfigure(GPIO_PL1_I2C2SCL);
-	ROM_GPIOPinConfigure(GPIO_PL0_I2C2SDA);
-
+	ROM_GPIOPinConfigure(GPIO_PG0_I2C1SCL);
+	ROM_GPIOPinConfigure(GPIO_PG1_I2C1SDA);
 	//
 	// Select the I2C function for these pins.  This function will also
 	// configure the GPIO pins pins for I2C operation, setting them to
 	// open-drain operation with weak pull-ups.  Consult the data sheet
 	// to see which functions are allocated per pin.
 	//
-	ROM_GPIOPinTypeI2C(GPIO_PORTL_BASE, GPIO_PIN_0);
-	GPIOPinTypeI2CSCL(GPIO_PORTL_BASE, GPIO_PIN_1);
+	ROM_GPIOPinTypeI2C(GPIO_PORTG_BASE, GPIO_PIN_1);
+	GPIOPinTypeI2CSCL(GPIO_PORTG_BASE, GPIO_PIN_0);
 
 	//
 	// Stop the Clock, Reset and Enable I2C Module
 	// in Master Function
 	//
-	ROM_SysCtlPeripheralDisable(SYSCTL_PERIPH_I2C2);
-	ROM_SysCtlPeripheralReset(SYSCTL_PERIPH_I2C2);
-	ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_I2C2);
+	ROM_SysCtlPeripheralDisable(SYSCTL_PERIPH_I2C1);
+	ROM_SysCtlPeripheralReset(SYSCTL_PERIPH_I2C1);
+	ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_I2C1);
 
 	//
 	// Wait for the Peripheral to be ready for programming
 	//
-	while(!ROM_SysCtlPeripheralReady(SYSCTL_PERIPH_I2C2));
+	while(!ROM_SysCtlPeripheralReady(SYSCTL_PERIPH_I2C1));
 
 	//
 	// Initialize and Configure the Master Module
 	//
-	ROM_I2CMasterInitExpClk(I2C2_BASE, SYSTEM_CLOCK, true);		//400kbps
+	ROM_I2CMasterInitExpClk(I2C1_BASE, SYSTEM_CLOCK, true);		//400kbps
 
 	//
 	// Enable Interrupts for Arbitration Lost, Stop, NAK, Clock Low
@@ -140,9 +139,16 @@ int main(void)
 // Flash the LEDs on the launchpad
 void demoI2CTask(void *pvParameters)
 {
-	uint8_t returned_data[2];
-	uint16_t bit_shift;
 	uint8_t data_rec;
+	uint8_t ctrl9_xl;
+	uint8_t ctrl1_xl;
+	uint8_t status;
+	uint8_t outx_l_xl;
+	uint8_t outx_h_xl;
+	uint8_t outy_l_xl;
+	uint8_t outy_h_xl;
+	uint8_t outz_l_xl;
+	uint8_t outz_h_xl;
 
     for (;;)
     {
@@ -163,65 +169,169 @@ void demoI2CTask(void *pvParameters)
         LEDWrite(0x0F, 0x08);
         vTaskDelay(1000);
 
-        //temperature sensor
-        /*
-        //writing
-        ROM_I2CMasterSlaveAddrSet(I2C2_BASE, TMP102_ADDR, false);   //write to tmp sensor
-        ROM_I2CMasterDataPut(I2C2_BASE, 0x01);
-        ROM_I2CMasterControl(I2C2_BASE, I2C_MASTER_CMD_SINGLE_SEND);
-        while(ROM_I2CMasterBusy(I2C2_BASE));
-
-        //reading byte1
-        ROM_I2CMasterSlaveAddrSet(I2C2_BASE, TMP102_ADDR, true);	//read from tmp sensor
-        ROM_I2CMasterControl(I2C2_BASE, I2C_MASTER_CMD_BURST_RECEIVE_START);
-        while(ROM_I2CMasterBusy(I2C2_BASE));
-        returned_data[0] = ROM_I2CMasterDataGet(I2C2_BASE);
-        UARTprintf("config reg1 is 0x%x\n", returned_data[0]);
-
-        //reading byte2
-        ROM_I2CMasterSlaveAddrSet(I2C2_BASE, TMP102_ADDR, true);    //read from tmp sensor
-        ROM_I2CMasterControl(I2C2_BASE, I2C_MASTER_CMD_BURST_RECEIVE_FINISH);
-        while(ROM_I2CMasterBusy(I2C2_BASE));
-        returned_data[1] = ROM_I2CMasterDataGet(I2C2_BASE);
-        UARTprintf("config reg2 is 0x%x\n\n", returned_data[1]);
-        */
 
         //accelerometer
-
         //writing 0x38 to CTRL9_XL(0x18)
-        ROM_I2CMasterSlaveAddrSet(I2C2_BASE, LSM6DS3_ADDR, false);   //write to accelerometer
-        ROM_I2CMasterDataPut(I2C2_BASE, 0x18);
-        ROM_I2CMasterControl(I2C2_BASE, I2C_MASTER_CMD_BURST_SEND_START);
-        while(ROM_I2CMasterBusy(I2C2_BASE));
+        //--------------------------------------------------------
+        ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, false);   //write to accelerometer
+        ROM_I2CMasterDataPut(I2C1_BASE, 0x18);
+        ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_START);
+        while(ROM_I2CMasterBusy(I2C1_BASE));
 
-        ROM_I2CMasterSlaveAddrSet(I2C2_BASE, LSM6DS3_ADDR, false);   //write to accelerometer
-        ROM_I2CMasterDataPut(I2C2_BASE, 0x38);
-        ROM_I2CMasterControl(I2C2_BASE, I2C_MASTER_CMD_BURST_SEND_FINISH);
-        while(ROM_I2CMasterBusy(I2C2_BASE));
+        SysCtlDelay(100); //Delay by 1us
+
+        ROM_I2CMasterDataPut(I2C1_BASE, 0x38);
+        ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_FINISH);
+        while(ROM_I2CMasterBusy(I2C1_BASE));
 
         UARTprintf("Finished writing to the CTRL9_XL register.\n");
 
-        //writing 0x60 to CTRL1_XL(0x10)
-        ROM_I2CMasterSlaveAddrSet(I2C2_BASE, LSM6DS3_ADDR, false);   //write to accelerometer
-        ROM_I2CMasterDataPut(I2C2_BASE, 0x10);
-        ROM_I2CMasterControl(I2C2_BASE, I2C_MASTER_CMD_BURST_SEND_START);
-        while(ROM_I2CMasterBusy(I2C2_BASE));
+        //reading 0x38
+        ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, false);   //write to accelerometer
+        ROM_I2CMasterDataPut(I2C1_BASE, 0x18);
+        ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_START);
+        while(ROM_I2CMasterBusy(I2C1_BASE));
 
-        ROM_I2CMasterSlaveAddrSet(I2C2_BASE, LSM6DS3_ADDR, false);   //write to accelerometer
-        ROM_I2CMasterDataPut(I2C2_BASE, 0x60);
-        ROM_I2CMasterControl(I2C2_BASE, I2C_MASTER_CMD_BURST_SEND_FINISH);
-        while(ROM_I2CMasterBusy(I2C2_BASE));
+        SysCtlDelay(100); //Delay by 1us
+
+        ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, true);    //read from status sensor
+        ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_SINGLE_RECEIVE);
+        while(ROM_I2CMasterBusy(I2C1_BASE));
+        ctrl9_xl = ROM_I2CMasterDataGet(I2C1_BASE);
+        //UARTprintf("CTRL9_XL is 0x%x\n", ctrl9_xl);
+
+
+        //writing 0x60 to CTRL1_XL(0x10)
+        //--------------------------------------------------------
+        ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, false);   //write to accelerometer
+        ROM_I2CMasterDataPut(I2C1_BASE, 0x10);
+        ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_START);
+        while(ROM_I2CMasterBusy(I2C1_BASE));
+
+        SysCtlDelay(100); //Delay by 1us
+
+        ROM_I2CMasterDataPut(I2C1_BASE, 0x60);
+        ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_FINISH);
+        while(ROM_I2CMasterBusy(I2C1_BASE));
 
         UARTprintf("Finished writing to the CTRL1_XL register.\n");
 
-        //read the STATUS register
-        ROM_I2CMasterSlaveAddrSet(I2C2_BASE, LSM6DS3_ADDR, true);    //read from status sensor
-        ROM_I2CMasterControl(I2C2_BASE, I2C_MASTER_CMD_SINGLE_RECEIVE);
-        while(ROM_I2CMasterBusy(I2C2_BASE));
-        data_rec = ROM_I2CMasterDataGet(I2C2_BASE);
+        //reading 0x38
+        ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, false);   //write to accelerometer
+        ROM_I2CMasterDataPut(I2C1_BASE, 0x10);
+        ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_START);
+        while(ROM_I2CMasterBusy(I2C1_BASE));
 
-        UARTprintf("status register is 0x%x\n\n", data_rec);
+        SysCtlDelay(100); //Delay by 1us
 
+        ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, true);    //read from status sensor
+        ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_SINGLE_RECEIVE);
+        while(ROM_I2CMasterBusy(I2C1_BASE));
+        ctrl1_xl = ROM_I2CMasterDataGet(I2C1_BASE);
+        //UARTprintf("CTRL1_XL is 0x%x\n", ctrl1_xl);
+
+        //read the STATUS register(0x1E)
+        ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, false);   //write to accelerometer
+        ROM_I2CMasterDataPut(I2C1_BASE, 0x1E);
+        ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_START);
+        while(ROM_I2CMasterBusy(I2C1_BASE));
+
+        SysCtlDelay(100); //Delay by 1us
+
+        ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, true);    //read from status sensor
+        ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_SINGLE_RECEIVE);
+        while(ROM_I2CMasterBusy(I2C1_BASE));
+        status = ROM_I2CMasterDataGet(I2C1_BASE);
+        //UARTprintf("STATUS is 0x%x\n", status);
+
+        if(status & 0x01){
+            UARTprintf("New accelerometer data available\n");
+
+            //read the outx_l_xl register(0x28)
+            ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, false);   //write to accelerometer
+            ROM_I2CMasterDataPut(I2C1_BASE, 0x28);
+            ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_START);
+            while(ROM_I2CMasterBusy(I2C1_BASE));
+
+            SysCtlDelay(100); //Delay by 1us
+
+            ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, true);    //read from status sensor
+            ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_SINGLE_RECEIVE);
+            while(ROM_I2CMasterBusy(I2C1_BASE));
+            outx_l_xl = ROM_I2CMasterDataGet(I2C1_BASE);
+            UARTprintf("outx_l_xl is 0x%x\n", outx_l_xl);
+
+            //read the outx_h_xl register(0x29)
+            ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, false);   //write to accelerometer
+            ROM_I2CMasterDataPut(I2C1_BASE, 0x29);
+            ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_START);
+            while(ROM_I2CMasterBusy(I2C1_BASE));
+
+            SysCtlDelay(100); //Delay by 1us
+
+            ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, true);    //read from status sensor
+            ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_SINGLE_RECEIVE);
+            while(ROM_I2CMasterBusy(I2C1_BASE));
+            outx_l_xl = ROM_I2CMasterDataGet(I2C1_BASE);
+            UARTprintf("outx_h_xl is 0x%x\n", outx_h_xl);
+
+            //read the outy_l_xl register(0x2A)
+            ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, false);   //write to accelerometer
+            ROM_I2CMasterDataPut(I2C1_BASE, 0x2A);
+            ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_START);
+            while(ROM_I2CMasterBusy(I2C1_BASE));
+
+            SysCtlDelay(100); //Delay by 1us
+
+            ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, true);    //read from status sensor
+            ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_SINGLE_RECEIVE);
+            while(ROM_I2CMasterBusy(I2C1_BASE));
+            outy_l_xl = ROM_I2CMasterDataGet(I2C1_BASE);
+            UARTprintf("outy_l_xl is 0x%x\n", outy_l_xl);
+
+            //read the outy_h_xl register(0x2B)
+            ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, false);   //write to accelerometer
+            ROM_I2CMasterDataPut(I2C1_BASE, 0x2B);
+            ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_START);
+            while(ROM_I2CMasterBusy(I2C1_BASE));
+
+            SysCtlDelay(100); //Delay by 1us
+
+            ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, true);    //read from status sensor
+            ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_SINGLE_RECEIVE);
+            while(ROM_I2CMasterBusy(I2C1_BASE));
+            outy_h_xl = ROM_I2CMasterDataGet(I2C1_BASE);
+            UARTprintf("outy_h_xl is 0x%x\n", outy_h_xl);
+
+            //read the outz_l_xl register(0x2C)
+            ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, false);   //write to accelerometer
+            ROM_I2CMasterDataPut(I2C1_BASE, 0x2C);
+            ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_START);
+            while(ROM_I2CMasterBusy(I2C1_BASE));
+
+            SysCtlDelay(100); //Delay by 1us
+
+            ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, true);    //read from status sensor
+            ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_SINGLE_RECEIVE);
+            while(ROM_I2CMasterBusy(I2C1_BASE));
+            outz_l_xl = ROM_I2CMasterDataGet(I2C1_BASE);
+            UARTprintf("outz_l_xl is 0x%x\n", outz_l_xl);
+
+            //read the outz_h_xl register(0x2D)
+            ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, false);   //write to accelerometer
+            ROM_I2CMasterDataPut(I2C1_BASE, 0x2D);
+            ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_START);
+            while(ROM_I2CMasterBusy(I2C1_BASE));
+
+            SysCtlDelay(100); //Delay by 1us
+
+            ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, true);    //read from status sensor
+            ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_SINGLE_RECEIVE);
+            while(ROM_I2CMasterBusy(I2C1_BASE));
+            outz_h_xl = ROM_I2CMasterDataGet(I2C1_BASE);
+            UARTprintf("outz_h_xl is 0x%x\n\n\n", outz_h_xl);
+
+        }
     }
 }
 
