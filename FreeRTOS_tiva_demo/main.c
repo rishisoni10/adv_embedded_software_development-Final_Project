@@ -41,8 +41,8 @@
 // Global instance structure for the I2C master driver.
 //tI2CMInstance g_sI2CInst;
 
-// Demo Task declarations
-void demoI2CTask(void *pvParameters);
+// Task declarations
+void pedometerTask(void *pvParameters);
 //void demoSerialTask(void *pvParameters);
 
 void I2C_Init(void)
@@ -124,8 +124,8 @@ int main(void)
 
 	I2C_Init();
 
-    // Create demo tasks
-    xTaskCreate(demoI2CTask, (const portCHAR *)"I2C",
+    // Create pedometer tasks
+    xTaskCreate(pedometerTask, (const portCHAR *)"pedometer",
                 configMINIMAL_STACK_SIZE, NULL, 1, NULL);
 
 //    xTaskCreate(demoSerialTask, (const portCHAR *)"Serial",
@@ -137,9 +137,8 @@ int main(void)
 
 
 // Flash the LEDs on the launchpad
-void demoI2CTask(void *pvParameters)
+void pedometerTask(void *pvParameters)
 {
-	uint8_t data_rec;
 	uint8_t ctrl9_xl;
 	uint8_t ctrl1_xl;
 	uint8_t status;
