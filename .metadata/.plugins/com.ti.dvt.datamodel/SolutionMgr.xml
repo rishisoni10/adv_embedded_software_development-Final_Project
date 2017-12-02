@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<java version="1.8.0_112" class="java.beans.XMLDecoder">
+<java version="1.7.0_80" class="java.beans.XMLDecoder">
  <object class="com.ti.dvt.datamodel.solution.SolutionManager$PersistState" id="SolutionManager$PersistState0">
   <void class="com.ti.dvt.datamodel.solution.SolutionManager$PersistState" method="getField">
    <string>defaultSolution</string>
    <void method="set">
     <object idref="SolutionManager$PersistState0"/>
-    <string>C:\ti\ccsv7\ccs_base\dvt_4.1.0.201708101502\CodeGen\solutions\CodeGenCoverage</string>
+    <string>D:\Study\Grad_Courses\Sem_3\APES\Project_2\adv_embedded_software_development-Final_Project\dvt\AnalysisSolutionsTemp\AnalysisSolution1512189626453\null</string>
    </void>
   </void>
  </object>
@@ -14,7 +14,10 @@
  <void id="ArrayList0" method="get">
   <object idref="SolutionManager$PersistState0"/>
   <void method="add">
-   <string>C:\ti\ccsv7\ccs_base\dvt_4.1.0.201708101502\CodeGen\solutions\CodeGenCoverage</string>
+   <string>C:\ti\ccsv6\ccs_base\dvt_4.1.0.201609091143\CodeGen\solutions\CodeGenCoverage</string>
+  </void>
+  <void method="add">
+   <string>D:\Study\Grad_Courses\Sem_3\APES\Project_2\adv_embedded_software_development-Final_Project\dvt\AnalysisSolutionsTemp\AnalysisSolution1512189626453\null</string>
   </void>
  </void>
 </void>

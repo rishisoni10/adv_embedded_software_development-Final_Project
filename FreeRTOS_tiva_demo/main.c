@@ -1,8 +1,8 @@
-/* FreeRTOS 8.2 Tiva Demo
+/* APES Project_2 FreeRTOS and TivaWare test code
  *
  * main.c
  *
- * Andy Kobyljanec
+ * Rishi Soni & Snehal Sanghvi
  *
  * This is a simple demonstration project of FreeRTOS 8.2 on the Tiva Launchpad
  * EK-TM4C1294XL.  TivaWare driverlib sourcecode is included.
@@ -27,6 +27,8 @@
 #include "driverlib/interrupt.h"
 #include "driverlib/pin_map.h"
 #include "driverlib/uart.h"
+#include "driverlib/adc.h"
+
 
 // FreeRTOS includes
 #include "FreeRTOSConfig.h"
@@ -41,9 +43,66 @@
 // Global instance structure for the I2C master driver.
 //tI2CMInstance g_sI2CInst;
 
+uint32_t pulse_rate[1];
+
 // Task declarations
 void pedometerTask(void *pvParameters);
+void heartbeatTask(void *pvParameters);
 //void demoSerialTask(void *pvParameters);
+
+void GPIO_Init(void)
+{
+    //PortB for GPIO r/w
+    ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOB);
+
+    //PB2 = LO-; PB3 = LO+
+    GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, GPIO_PIN_2|GPIO_PIN_3);
+
+}
+//Setup the ADC Peripheral for the Pulse Sensor
+void ADC_Init(void)
+{
+    SysCtlPeripheralReset(SYSCTL_PERIPH_GPIOE);
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOE);
+    SysCtlPeripheralReset(SYSCTL_PERIPH_ADC0);
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_ADC0);
+    SysCtlDelay(10);
+
+    GPIOPinTypeADC(GPIO_PORTE_BASE, GPIO_PIN_3);    //ADC Channel-0 Only
+
+//    ADCClockConfigSet(ADC0_BASE, ADC_CLOCK_SRC_PLL | ADC_CLOCK_RATE_EIGHTH, 30);
+
+    // Enable sample sequence 3 with a processor signal trigger.  Sequence 3
+    // will do a single sample when the processor sends a signal to start the
+    // conversion.  Each ADC module has 4 programmable sequences, sequence 0
+    // to sequence 3.
+    //
+    ADCSequenceConfigure(ADC0_BASE, 3, ADC_TRIGGER_PROCESSOR, 0);
+    //
+    // Configure step 0 on sequence 3.  Sample channel 0 (ADC_CTL_CH0) in
+    // single-ended mode (default) and configure the interrupt flag
+    // (ADC_CTL_IE) to be set when the sample is done.  Tell the ADC logic
+    // that this is the last conversion on sequence 3 (ADC_CTL_END).  Sequence
+    // 3 has only one programmable step.  Sequence 1 and 2 have 4 steps, and
+    // sequence 0 has 8 programmable steps.  Since we are only doing a single
+    // conversion using sequence 3 we will only configure step 0.  For more
+    // information on the ADC sequences and steps, reference the datasheet.
+    //
+    ADCSequenceStepConfigure(ADC0_BASE, 3, 0, ADC_CTL_CH0 | ADC_CTL_IE |
+                             ADC_CTL_END);
+
+    //
+    // Clear the interrupt status flag.  This is done to make sure the
+    // interrupt flag is cleared before we sample.
+    //
+    ADCIntClear(ADC0_BASE, 3);
+
+    //
+    // Since sample sequence 3 is now configured, it must be enabled.
+    //
+    ADCSequenceEnable(ADC0_BASE, 3);
+
+}
 
 void I2C_Init(void)
 {
@@ -123,9 +182,15 @@ int main(void)
 	UARTStdioConfig(0, 57600, SYSTEM_CLOCK);
 
 	I2C_Init();
+	GPIO_Init();
+	ADC_Init();
 
-    // Create pedometer tasks
+    // Create pedometer task
     xTaskCreate(pedometerTask, (const portCHAR *)"pedometer",
+                configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+
+    // Create heartbeat task
+    xTaskCreate(heartbeatTask, (const portCHAR *)"heartbeat",
                 configMINIMAL_STACK_SIZE, NULL, 1, NULL);
 
 //    xTaskCreate(demoSerialTask, (const portCHAR *)"Serial",
@@ -333,6 +398,55 @@ void pedometerTask(void *pvParameters)
         }
     }
 }
+
+// Read heartbeat digital values
+void heartbeatTask(void *pvParameters)
+{
+    for (;;)
+    {
+//        SysCtlDelay(10);
+        // Turn on LED 1
+        LEDWrite(0x0F, 0x01);
+        vTaskDelay(1000);
+
+        // Turn on LED 2
+        LEDWrite(0x0F, 0x02);
+        vTaskDelay(1000);
+
+        // Turn on LED 3
+        LEDWrite(0x0F, 0x04);
+        vTaskDelay(1000);
+
+        // Turn on LED 4
+        LEDWrite(0x0F, 0x08);
+        vTaskDelay(1000);
+
+        //Trigger ADC conversion
+        ADCProcessorTrigger(ADC0_BASE, 3);
+
+        //Wait for conversion to complete
+        while(!ADCIntStatus(ADC0_BASE, 3, false));
+
+        //Clear ADC interrupt flag
+        ADCIntClear(ADC0_BASE, 3);
+
+        //Read ADC value
+        ADCSequenceDataGet(ADC0_BASE, 3, pulse_rate);
+
+        //Display the AIN0 (PE3) digital value on UART
+        UARTprintf("AIN0 = %4d\n", pulse_rate[0]);
+
+        int32_t D0 = GPIOPinRead(GPIO_PORTB_BASE, GPIO_PIN_2);  //LO- Status
+        int32_t D1 = GPIOPinRead(GPIO_PORTE_BASE, GPIO_PIN_3);  //LO+ Status
+
+        //Display the LO- & LO+ digital value on UART
+        UARTprintf("LO- = %d  LO+ = %d\n", D0, D1);
+
+        //Delay for some time
+        SysCtlDelay(100);
+    }
+}
+
 
 
 // Write text over the Stellaris debug interface UART port
