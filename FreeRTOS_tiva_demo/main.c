@@ -38,6 +38,10 @@
 
 #define LSM6DS3_ADDR		(0x6B)
 #define TMP102_ADDR			(0x48)
+#define PEDOMETER           1
+#define HEART_RATE          1
+
+#undef HEART_RATE
 
 
 // Global instance structure for the I2C master driver.
@@ -59,6 +63,9 @@ void GPIO_Init(void)
     GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, GPIO_PIN_2|GPIO_PIN_3);
 
 }
+
+
+#ifdef HEART_RATE
 //Setup the ADC Peripheral for the Pulse Sensor
 void ADC_Init(void)
 {
@@ -103,7 +110,10 @@ void ADC_Init(void)
     ADCSequenceEnable(ADC0_BASE, 3);
 
 }
+#endif
 
+
+#ifdef PEDOMETER
 void I2C_Init(void)
 {
 	// The I2C2 peripheral must be enabled before use.
@@ -162,45 +172,10 @@ void I2C_Init(void)
 //	ROM_IntEnable(INT_I2C2);
 
 }
+#endif
 
 
-// Main function
-int main(void)
-{
-    // Initialize system clock to 120 MHz
-    uint32_t output_clock_rate_hz;
-    output_clock_rate_hz = ROM_SysCtlClockFreqSet(
-                               (SYSCTL_XTAL_25MHZ | SYSCTL_OSC_MAIN |
-                                SYSCTL_USE_PLL | SYSCTL_CFG_VCO_480),
-                               SYSTEM_CLOCK);
-    ASSERT(output_clock_rate_hz == SYSTEM_CLOCK);
-
-    // Initialize the GPIO pins for the Launchpad
-    PinoutSet(false, false);
-
-    // Set up the UART which is connected to the virtual COM port
-	UARTStdioConfig(0, 57600, SYSTEM_CLOCK);
-
-	I2C_Init();
-	GPIO_Init();
-	ADC_Init();
-
-    // Create pedometer task
-    xTaskCreate(pedometerTask, (const portCHAR *)"pedometer",
-                configMINIMAL_STACK_SIZE, NULL, 1, NULL);
-
-    // Create heartbeat task
-    xTaskCreate(heartbeatTask, (const portCHAR *)"heartbeat",
-                configMINIMAL_STACK_SIZE, NULL, 1, NULL);
-
-//    xTaskCreate(demoSerialTask, (const portCHAR *)"Serial",
-//                configMINIMAL_STACK_SIZE, NULL, 1, NULL);
-
-    vTaskStartScheduler();
-    return 0;
-}
-
-
+#ifdef PEDOMETER
 // Flash the LEDs on the launchpad
 void pedometerTask(void *pvParameters)
 {
@@ -218,20 +193,9 @@ void pedometerTask(void *pvParameters)
     {
 //        SysCtlDelay(10);
         // Turn on LED 1
-        LEDWrite(0x0F, 0x01);
+        /*LEDWrite(0x0F, 0x01);
         vTaskDelay(1000);
-
-        // Turn on LED 2
-        LEDWrite(0x0F, 0x02);
-        vTaskDelay(1000);
-
-        // Turn on LED 3
-        LEDWrite(0x0F, 0x04);
-        vTaskDelay(1000);
-
-        // Turn on LED 4
-        LEDWrite(0x0F, 0x08);
-        vTaskDelay(1000);
+        */
 
 
         //accelerometer
@@ -398,7 +362,10 @@ void pedometerTask(void *pvParameters)
         }
     }
 }
+#endif
 
+
+#ifdef HEART_RATE
 // Read heartbeat digital values
 void heartbeatTask(void *pvParameters)
 {
@@ -446,7 +413,7 @@ void heartbeatTask(void *pvParameters)
         SysCtlDelay(100);
     }
 }
-
+#endif
 
 
 // Write text over the Stellaris debug interface UART port
@@ -470,4 +437,48 @@ void __error__(char *pcFilename, uint32_t ui32Line)
     while (1)
     {
     }
+}
+
+
+// Main function
+int main(void)
+{
+    // Initialize system clock to 120 MHz
+    uint32_t output_clock_rate_hz;
+    output_clock_rate_hz = ROM_SysCtlClockFreqSet(
+                               (SYSCTL_XTAL_25MHZ | SYSCTL_OSC_MAIN |
+                                SYSCTL_USE_PLL | SYSCTL_CFG_VCO_480),
+                               SYSTEM_CLOCK);
+    ASSERT(output_clock_rate_hz == SYSTEM_CLOCK);
+
+    // Initialize the GPIO pins for the Launchpad
+    PinoutSet(false, false);
+
+    // Set up the UART which is connected to the virtual COM port
+    UARTStdioConfig(0, 57600, SYSTEM_CLOCK);
+
+#ifdef  PEDOMETER
+    I2C_Init();
+#endif
+#ifdef HEART_RATE
+    GPIO_Init();
+    ADC_Init();
+#endif
+
+#ifdef PEDOMETER
+    // Create pedometer task
+    xTaskCreate(pedometerTask, (const portCHAR *)"pedometer",
+                configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+#endif
+#ifdef HEART_RATE
+    // Create heartbeat task
+    xTaskCreate(heartbeatTask, (const portCHAR *)"heartbeat",
+                configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+#endif
+
+//    xTaskCreate(demoSerialTask, (const portCHAR *)"Serial",
+//                configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+
+    vTaskStartScheduler();
+    return 0;
 }
