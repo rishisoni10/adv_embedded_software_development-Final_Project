@@ -28,6 +28,8 @@
 #include "driverlib/pin_map.h"
 #include "driverlib/uart.h"
 #include "driverlib/adc.h"
+#include "driverlib/timer.h"
+
 
 
 // FreeRTOS includes
@@ -36,36 +38,124 @@
 #include "task.h"
 #include "queue.h"
 
-#define LSM6DS3_ADDR		(0x6B)
-#define TMP102_ADDR			(0x48)
+#define LSM6DS3_ADDR        (0x6B)
+#define TMP102_ADDR         (0x48)
 #define PEDOMETER           1
 #define HEART_RATE          1
-
-#undef HEART_RATE
 
 
 // Global instance structure for the I2C master driver.
 //tI2CMInstance g_sI2CInst;
 
 uint32_t pulse_rate[1];
+uint32_t heart_rate = 0;
+uint32_t output_clock_rate_hz;
+
 
 // Task declarations
 void pedometerTask(void *pvParameters);
 void heartbeatTask(void *pvParameters);
 //void demoSerialTask(void *pvParameters);
 
-void GPIO_Init(void)
+//*****************************************************************************
+//
+// The interrupt handler for the Timer0A interrupt.
+//
+//*****************************************************************************
+void
+Timer0AIntHandler(void)
 {
-    //PortB for GPIO r/w
-    ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOB);
+    //
+    // Clear the timer interrupt flag.
+    //
+    TimerIntClear(TIMER0_BASE, TIMER_TIMA_TIMEOUT);
 
-    //PB2 = LO-; PB3 = LO+
-    GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, GPIO_PIN_2|GPIO_PIN_3);
+    //
+    // Update the periodic interrupt counter.
+    //
+//    g_ui32Counter++;
+
+    //
+    // Once NUMBER_OF_INTS interrupts have been received, turn off the
+    // TIMER0B interrupt.
+    //
+//    if(g_ui32Counter == NUMBER_OF_INTS)
+//    {
+        //
+        // Disable the Timer0A interrupt.
+        //
+        IntDisable(INT_TIMER0A);
+
+        //
+        // Turn off Timer0A interrupt.
+        //
+        TimerIntDisable(TIMER0_BASE, TIMER_TIMA_TIMEOUT);
+
+        //
+        // Clear any pending interrupt flag.
+        //
+//        TimerIntClear(TIMER0_BASE, TIMER_TIMA_TIMEOUT);
+//    }
+        UARTprintf("Timer Interrupt\n");
 
 }
 
 
+
+
+
+void GPIO_Init(void)
+{
+    //PortB for GPIO r/w
+    ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOB);
+    ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOF);
+
+
+    //PB2 = LO-; PB3 = LO+
+//    GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, GPIO_PIN_2|GPIO_PIN_3);
+
+
+    GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, GPIO_PIN_3);  //PB3 = LO+
+    GPIOPinTypeGPIOInput(GPIO_PORTF_BASE, GPIO_PIN_1);  //PF1 = LO-
+}
+
 #ifdef HEART_RATE
+void Timer_Init(void)
+{
+    //
+    // The Timer0 peripheral must be enabled for use.
+    //
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_TIMER0);
+    //
+    // Wait for the Timer0 module to be ready.
+    //
+    while(!SysCtlPeripheralReady(SYSCTL_PERIPH_TIMER0));
+
+    //Using System Clock of 120 MHz
+    TimerClockSourceSet(TIMER0_BASE, TIMER_CLOCK_SYSTEM);
+
+    //
+    // Configure Timer0 as a 32-bit full-width periodic timer.
+    //
+    TimerConfigure(TIMER0_BASE, TIMER_CFG_PERIODIC);
+
+    //
+    // Set the count time for the periodic timer (TimerA) = 30seconds
+    //
+    TimerLoadSet(TIMER0_BASE, TIMER_A, output_clock_rate_hz/0.033);
+
+    //Register timerA interrupt handler
+    TimerIntRegister(TIMER0_BASE, TIMER_A, Timer0AIntHandler);
+
+}
+
+void Comparator_Init(void)
+{
+
+}
+
+
+
 //Setup the ADC Peripheral for the Pulse Sensor
 void ADC_Init(void)
 {
@@ -110,84 +200,96 @@ void ADC_Init(void)
     ADCSequenceEnable(ADC0_BASE, 3);
 
 }
-#endif
 
+void Peripheral_Int(void)
+{
+    //
+    // Configure the Timer0B interrupt for timer timeout.
+    //
+    TimerIntEnable(TIMER0_BASE, TIMER_TIMA_TIMEOUT);
+
+    //
+    // Enable the Timer0B interrupt on the processor (NVIC).
+    //
+    IntEnable(INT_TIMER0A);
+}
+
+#endif
 
 #ifdef PEDOMETER
 void I2C_Init(void)
 {
-	// The I2C2 peripheral must be enabled before use.
-	// On GPIO PortL
-	ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOG);
+    // The I2C2 peripheral must be enabled before use.
+    // On GPIO PortL
+    ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOG);
 
-	//
-	// Wait for the Peripheral to be ready for programming
-	//
-	while(!ROM_SysCtlPeripheralReady(SYSCTL_PERIPH_GPIOG));
+    //
+    // Wait for the Peripheral to be ready for programming
+    //
+    while(!ROM_SysCtlPeripheralReady(SYSCTL_PERIPH_GPIOG));
 
-	//
-	// Configure the pin muxing for I2C2 functions on port L0 and L1.
-	// This step is not necessary if your part does not support pin muxing.
-	//
-	ROM_GPIOPinConfigure(GPIO_PG0_I2C1SCL);
-	ROM_GPIOPinConfigure(GPIO_PG1_I2C1SDA);
-	//
-	// Select the I2C function for these pins.  This function will also
-	// configure the GPIO pins pins for I2C operation, setting them to
-	// open-drain operation with weak pull-ups.  Consult the data sheet
-	// to see which functions are allocated per pin.
-	//
-	ROM_GPIOPinTypeI2C(GPIO_PORTG_BASE, GPIO_PIN_1);
-	GPIOPinTypeI2CSCL(GPIO_PORTG_BASE, GPIO_PIN_0);
+    //
+    // Configure the pin muxing for I2C2 functions on port L0 and L1.
+    // This step is not necessary if your part does not support pin muxing.
+    //
+    ROM_GPIOPinConfigure(GPIO_PG0_I2C1SCL);
+    ROM_GPIOPinConfigure(GPIO_PG1_I2C1SDA);
+    //
+    // Select the I2C function for these pins.  This function will also
+    // configure the GPIO pins pins for I2C operation, setting them to
+    // open-drain operation with weak pull-ups.  Consult the data sheet
+    // to see which functions are allocated per pin.
+    //
+    ROM_GPIOPinTypeI2C(GPIO_PORTG_BASE, GPIO_PIN_1);
+    GPIOPinTypeI2CSCL(GPIO_PORTG_BASE, GPIO_PIN_0);
 
-	//
-	// Stop the Clock, Reset and Enable I2C Module
-	// in Master Function
-	//
-	ROM_SysCtlPeripheralDisable(SYSCTL_PERIPH_I2C1);
-	ROM_SysCtlPeripheralReset(SYSCTL_PERIPH_I2C1);
-	ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_I2C1);
+    //
+    // Stop the Clock, Reset and Enable I2C Module
+    // in Master Function
+    //
+    ROM_SysCtlPeripheralDisable(SYSCTL_PERIPH_I2C1);
+    ROM_SysCtlPeripheralReset(SYSCTL_PERIPH_I2C1);
+    ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_I2C1);
 
-	//
-	// Wait for the Peripheral to be ready for programming
-	//
-	while(!ROM_SysCtlPeripheralReady(SYSCTL_PERIPH_I2C1));
+    //
+    // Wait for the Peripheral to be ready for programming
+    //
+    while(!ROM_SysCtlPeripheralReady(SYSCTL_PERIPH_I2C1));
 
-	//
-	// Initialize and Configure the Master Module
-	//
-	ROM_I2CMasterInitExpClk(I2C1_BASE, SYSTEM_CLOCK, true);		//400kbps
+    //
+    // Initialize and Configure the Master Module
+    //
+    ROM_I2CMasterInitExpClk(I2C1_BASE, SYSTEM_CLOCK, true);     //400kbps
 
-	//
-	// Enable Interrupts for Arbitration Lost, Stop, NAK, Clock Low
-	// Timeout and Data.
-	//
-//	ROM_I2CMasterIntEnableEx(I2C2_BASE, (I2C_MASTER_INT_ARB_LOST |
-//	I2C_MASTER_INT_STOP | I2C_MASTER_INT_NACK |
-//	I2C_MASTER_INT_TIMEOUT | I2C_MASTER_INT_DATA));
+    //
+    // Enable Interrupts for Arbitration Lost, Stop, NAK, Clock Low
+    // Timeout and Data.
+    //
+//  ROM_I2CMasterIntEnableEx(I2C2_BASE, (I2C_MASTER_INT_ARB_LOST |
+//  I2C_MASTER_INT_STOP | I2C_MASTER_INT_NACK |
+//  I2C_MASTER_INT_TIMEOUT | I2C_MASTER_INT_DATA));
 
-	//
-	// Enable the Interrupt in the NVIC from I2C Master
-	//
-//	ROM_IntEnable(INT_I2C2);
+    //
+    // Enable the Interrupt in the NVIC from I2C Master
+    //
+//  ROM_IntEnable(INT_I2C2);
 
 }
 #endif
 
 
-#ifdef PEDOMETER
 // Flash the LEDs on the launchpad
 void pedometerTask(void *pvParameters)
 {
-	uint8_t ctrl9_xl;
-	uint8_t ctrl1_xl;
-	uint8_t status;
-	uint8_t outx_l_xl;
-	uint8_t outx_h_xl;
-	uint8_t outy_l_xl;
-	uint8_t outy_h_xl;
-	uint8_t outz_l_xl;
-	uint8_t outz_h_xl;
+    uint8_t ctrl9_xl;
+    uint8_t ctrl1_xl;
+    uint8_t status;
+    uint8_t outx_l_xl;
+    uint8_t outx_h_xl;
+    uint8_t outy_l_xl;
+    uint8_t outy_h_xl;
+    uint8_t outz_l_xl;
+    uint8_t outz_h_xl;
 
     for (;;)
     {
@@ -364,29 +466,32 @@ void pedometerTask(void *pvParameters)
 }
 #endif
 
-
-#ifdef HEART_RATE
 // Read heartbeat digital values
 void heartbeatTask(void *pvParameters)
 {
-    for (;;)
+    //
+    // Enable Timer0A.
+    //
+    TimerEnable(TIMER0_BASE, TIMER_A);
+
+    while (1)
     {
 //        SysCtlDelay(10);
-        // Turn on LED 1
+//         Turn on LED 1
         LEDWrite(0x0F, 0x01);
         vTaskDelay(1000);
 
         // Turn on LED 2
         LEDWrite(0x0F, 0x02);
         vTaskDelay(1000);
-
-        // Turn on LED 3
-        LEDWrite(0x0F, 0x04);
-        vTaskDelay(1000);
-
-        // Turn on LED 4
-        LEDWrite(0x0F, 0x08);
-        vTaskDelay(1000);
+//
+//        // Turn on LED 3
+//        LEDWrite(0x0F, 0x04);
+//        vTaskDelay(1000);
+//
+//        // Turn on LED 4
+//        LEDWrite(0x0F, 0x08);
+//        vTaskDelay(1000);
 
         //Trigger ADC conversion
         ADCProcessorTrigger(ADC0_BASE, 3);
@@ -397,23 +502,36 @@ void heartbeatTask(void *pvParameters)
         //Clear ADC interrupt flag
         ADCIntClear(ADC0_BASE, 3);
 
-        //Read ADC value
-        ADCSequenceDataGet(ADC0_BASE, 3, pulse_rate);
-
-        //Display the AIN0 (PE3) digital value on UART
-        UARTprintf("AIN0 = %4d\n", pulse_rate[0]);
-
-        int32_t D0 = GPIOPinRead(GPIO_PORTB_BASE, GPIO_PIN_2);  //LO- Status
-        int32_t D1 = GPIOPinRead(GPIO_PORTE_BASE, GPIO_PIN_3);  //LO+ Status
+//        int32_t D0 = GPIOPinRead(GPIO_PORTB_BASE, GPIO_PIN_2);  //LO- Status
+        int32_t D0 = GPIOPinRead(GPIO_PORTF_BASE, GPIO_PIN_1);  //LO- Status
+        int32_t D1 = GPIOPinRead(GPIO_PORTB_BASE, GPIO_PIN_3);  //LO+ Status
 
         //Display the LO- & LO+ digital value on UART
-        UARTprintf("LO- = %d  LO+ = %d\n", D0, D1);
+        UARTprintf("LO- = 0x%x  LO+ = 0x%x\n", D0, D1);
+
+        if(D0 == 0x04 || D1 == 0x08)
+        {
+            UARTprintf("NOT CONNECTED!\n");
+        }
+
+        else
+        {
+            //Read ADC value
+            ADCSequenceDataGet(ADC0_BASE, 3, pulse_rate);
+            if(pulse_rate[0] >= 2000)
+            {
+                heart_rate++;
+            }
+
+            //Display the AIN0 (PE3) digital value on UART
+            UARTprintf("AIN0 = %d\n", pulse_rate[0]);
+        }
 
         //Delay for some time
-        SysCtlDelay(100);
+        SysCtlDelay(1000);
     }
 }
-#endif
+
 
 
 // Write text over the Stellaris debug interface UART port
@@ -438,13 +556,10 @@ void __error__(char *pcFilename, uint32_t ui32Line)
     {
     }
 }
-
-
 // Main function
 int main(void)
 {
     // Initialize system clock to 120 MHz
-    uint32_t output_clock_rate_hz;
     output_clock_rate_hz = ROM_SysCtlClockFreqSet(
                                (SYSCTL_XTAL_25MHZ | SYSCTL_OSC_MAIN |
                                 SYSCTL_USE_PLL | SYSCTL_CFG_VCO_480),
@@ -463,22 +578,32 @@ int main(void)
 #ifdef HEART_RATE
     GPIO_Init();
     ADC_Init();
+    Timer_Init();
+    Comparator_Init();    
 #endif
 
 #ifdef PEDOMETER
     // Create pedometer task
-    xTaskCreate(pedometerTask, (const portCHAR *)"pedometer",
-                configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+     xTaskCreate(pedometerTask, (const portCHAR *)"pedometer",
+                  configMINIMAL_STACK_SIZE, NULL, 1, NULL);
 #endif
 #ifdef HEART_RATE
     // Create heartbeat task
     xTaskCreate(heartbeatTask, (const portCHAR *)"heartbeat",
                 configMINIMAL_STACK_SIZE, NULL, 1, NULL);
-#endif
 
 //    xTaskCreate(demoSerialTask, (const portCHAR *)"Serial",
 //                configMINIMAL_STACK_SIZE, NULL, 1, NULL);
 
+    //
+    // Enable processor interrupts.
+    //
+    IntMasterEnable();
+
+    //Enable interrupts of peripherals
+    Peripheral_Int();
+
+    //Start scheduler
     vTaskStartScheduler();
     return 0;
 }
