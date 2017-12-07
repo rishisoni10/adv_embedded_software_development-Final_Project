@@ -40,12 +40,12 @@
 
 #define LSM6DS3_ADDR        (0x6B)
 #define TMP102_ADDR         (0x48)
-#define PEDOMETER           1
+//#define PEDOMETER           1
 #define PULSE               1
 #define SOCKET              1
 #define ACCEL_RAW_VERBOSE   1
 
-#undef PULSE
+//#undef PULSE
 #undef ACCEL_RAW_VERBOSE
 
 // Global instance structure for the I2C master driver.
@@ -208,10 +208,10 @@ void Comparator_Init(void)
 {
 
 }
-#endif
-
-
-#ifdef PULSE
+//#endif
+//
+//
+//#ifdef PULSE
 //Setup the ADC Peripheral for the Pulse Sensor
 void ADC_Init(void)
 {
@@ -317,10 +317,10 @@ void I2C_Init(void)
     //
     ROM_I2CMasterInitExpClk(I2C1_BASE, SYSTEM_CLOCK, true);     //400kbps
 }
-#endif
-
-
-#ifdef PEDOMETER
+//#endif
+//
+//
+//#ifdef PEDOMETER
 void pedometerTask(void *pvParameters)
 {
     uint8_t ctrl9_xl;
@@ -725,6 +725,7 @@ int main(void)
     I2C_Init();
 #endif
 #ifdef PULSE
+    Peripheral_Int();       //Enable interrupts of peripherals
     ADC_Init();
     Timer_Init();
     Comparator_Init();    
@@ -743,18 +744,13 @@ int main(void)
                 configMINIMAL_STACK_SIZE, NULL, 2, NULL);
 #endif
 
-    xTaskCreate(socketTask, (const portCHAR *)"socket",
-                configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+//    xTaskCreate(socketTask, (const portCHAR *)"socket",
+//                configMINIMAL_STACK_SIZE, NULL, 1, NULL);
 
     //
     // Enable processor interrupts.
     //
     //IntMasterEnable();
-
-#ifdef PULSE
-    //Enable interrupts of peripherals
-    Peripheral_Int();
-#endif
 
     //Start scheduler
     vTaskStartScheduler();
