@@ -41,20 +41,28 @@
 #define LSM6DS3_ADDR        (0x6B)
 #define TMP102_ADDR         (0x48)
 #define PEDOMETER           1
-#define HEART_RATE          1
+#define PULSE               1
+#define SOCKET              1
+#define ACCEL_RAW_VERBOSE   1
 
+#undef PULSE
+#undef ACCEL_RAW_VERBOSE
 
 // Global instance structure for the I2C master driver.
 //tI2CMInstance g_sI2CInst;
 
 uint32_t pulse_rate[1];
-uint32_t heart_rate = 0;
+//uint32_t heart_rate;
 uint32_t output_clock_rate_hz;
+uint32_t GPIO_pin_a4;
+volatile int isr_counter;
 
+QueueHandle_t pedQueue;
 
 // Task declarations
 void pedometerTask(void *pvParameters);
 void heartbeatTask(void *pvParameters);
+void socketTask(void *pvParameters);
 //void demoSerialTask(void *pvParameters);
 
 //*****************************************************************************
@@ -101,25 +109,72 @@ Timer0AIntHandler(void)
 }
 
 
-
+void PortAIntHandler(void){
+    taskDISABLE_INTERRUPTS();
+    ROM_GPIOIntDisable(GPIO_PORTA_BASE, GPIO_PIN_4);
+    IntMasterDisable();
+    ROM_GPIOIntClear(GPIO_PORTA_BASE, GPIO_PIN_4);  // Clear interrupt flag
+    isr_counter++;
+    ROM_GPIOIntTypeSet(GPIO_PORTA_BASE, GPIO_PIN_4, GPIO_RISING_EDGE);
+    IntMasterEnable();
+    ROM_GPIOIntEnable(GPIO_PORTA_BASE, GPIO_PIN_4);
+    taskENABLE_INTERRUPTS();
+}
 
 
 void GPIO_Init(void)
 {
     //PortB for GPIO r/w
     ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOB);
-    ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOF);
+    //ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOF);
 
 
     //PB2 = LO-; PB3 = LO+
-//    GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, GPIO_PIN_2|GPIO_PIN_3);
+    GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, GPIO_PIN_2|GPIO_PIN_3);
 
 
-    GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, GPIO_PIN_3);  //PB3 = LO+
-    GPIOPinTypeGPIOInput(GPIO_PORTF_BASE, GPIO_PIN_1);  //PF1 = LO-
+    //GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, GPIO_PIN_3);  //PB3 = LO+
+    //GPIOPinTypeGPIOInput(GPIO_PORTF_BASE, GPIO_PIN_1);  //PF1 = LO-
+
+        //
+    // Enable the GPIOA peripheral for INT1 signal coming from pedometer sensor
+    //
+    ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOA);
+    //
+    // Wait for the GPIOA module to be ready.
+    //
+    while(!ROM_SysCtlPeripheralReady(SYSCTL_PERIPH_GPIOA))
+    {
+    }
+
+    //
+    // Initialize the GPIO pin configuration.
+    //
+    // Set pin A4 as input
+    //
+    ROM_GPIOPinTypeGPIOInput(GPIO_PORTA_BASE, GPIO_PIN_4);
+
+    GPIOPadConfigSet(GPIO_PORTA_BASE, GPIO_PIN_4,
+        GPIO_STRENGTH_2MA, GPIO_PIN_TYPE_STD_WPU);  // Enable weak pullup resistor for PF4
+
+    GPIOIntDisable(GPIO_PORTA_BASE, GPIO_PIN_4);        // Disable interrupt for PA4 (in case it was enabled)
+    GPIOIntClear(GPIO_PORTA_BASE, GPIO_PIN_4);      // Clear pending interrupts for PF4
+
+    //
+    // Register the port-level interrupt handler. This handler is the first
+    // level interrupt handler for all the pin interrupts.
+    //
+    GPIOIntRegister(GPIO_PORTA_BASE, PortAIntHandler);
+
+    //
+    // Make pin 4 rising edge triggered interrupts.
+    //
+    ROM_GPIOIntTypeSet(GPIO_PORTA_BASE, GPIO_PIN_4, GPIO_RISING_EDGE);
+
+    ROM_GPIOIntEnable(GPIO_PORTA_BASE, GPIO_PIN_4);     // Enable interrupt for PF4
 }
 
-#ifdef HEART_RATE
+#ifdef PULSE
 void Timer_Init(void)
 {
     //
@@ -153,9 +208,10 @@ void Comparator_Init(void)
 {
 
 }
+#endif
 
 
-
+#ifdef PULSE
 //Setup the ADC Peripheral for the Pulse Sensor
 void ADC_Init(void)
 {
@@ -260,44 +316,40 @@ void I2C_Init(void)
     // Initialize and Configure the Master Module
     //
     ROM_I2CMasterInitExpClk(I2C1_BASE, SYSTEM_CLOCK, true);     //400kbps
-
-    //
-    // Enable Interrupts for Arbitration Lost, Stop, NAK, Clock Low
-    // Timeout and Data.
-    //
-//  ROM_I2CMasterIntEnableEx(I2C2_BASE, (I2C_MASTER_INT_ARB_LOST |
-//  I2C_MASTER_INT_STOP | I2C_MASTER_INT_NACK |
-//  I2C_MASTER_INT_TIMEOUT | I2C_MASTER_INT_DATA));
-
-    //
-    // Enable the Interrupt in the NVIC from I2C Master
-    //
-//  ROM_IntEnable(INT_I2C2);
-
 }
 #endif
 
 
-// Flash the LEDs on the launchpad
+#ifdef PEDOMETER
 void pedometerTask(void *pvParameters)
 {
     uint8_t ctrl9_xl;
     uint8_t ctrl1_xl;
     uint8_t status;
+#ifdef ACCEL_RAW_VERBOSE
     uint8_t outx_l_xl;
     uint8_t outx_h_xl;
     uint8_t outy_l_xl;
     uint8_t outy_h_xl;
     uint8_t outz_l_xl;
     uint8_t outz_h_xl;
+#endif
+    uint8_t step_counter_l;
+    uint8_t step_counter_h;
+    uint16_t step_counter;
 
-    for (;;)
+    uint32_t data_pedQueue = 0;
+    BaseType_t status_pedQueue;
+
+    //instanting the message packet
+    static message_t messg;
+    task_id_t id = pedometer;
+   for (;;)
     {
 //        SysCtlDelay(10);
         // Turn on LED 1
-        /*LEDWrite(0x0F, 0x01);
+        LEDWrite(0x0F, 0x01);
         vTaskDelay(1000);
-        */
 
 
         //accelerometer
@@ -331,7 +383,7 @@ void pedometerTask(void *pvParameters)
         //UARTprintf("CTRL9_XL is 0x%x\n", ctrl9_xl);
 
 
-        //writing 0x60 to CTRL1_XL(0x10)
+        //writing 0x20 to CTRL1_XL(0x10) for pedometer functionality
         //--------------------------------------------------------
         ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, false);   //write to accelerometer
         ROM_I2CMasterDataPut(I2C1_BASE, 0x10);
@@ -340,26 +392,58 @@ void pedometerTask(void *pvParameters)
 
         SysCtlDelay(100); //Delay by 1us
 
-        ROM_I2CMasterDataPut(I2C1_BASE, 0x60);
+        ROM_I2CMasterDataPut(I2C1_BASE, 0x20);
         ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_FINISH);
         while(ROM_I2CMasterBusy(I2C1_BASE));
 
         UARTprintf("Finished writing to the CTRL1_XL register.\n");
-
-        //reading 0x38
+       //writing 0x3C to CTRL10_C(0x19)
+        //--------------------------------------------------------
         ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, false);   //write to accelerometer
-        ROM_I2CMasterDataPut(I2C1_BASE, 0x10);
+        ROM_I2CMasterDataPut(I2C1_BASE, 0x19);
         ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_START);
         while(ROM_I2CMasterBusy(I2C1_BASE));
 
         SysCtlDelay(100); //Delay by 1us
 
-        ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, true);    //read from status sensor
-        ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_SINGLE_RECEIVE);
+        ROM_I2CMasterDataPut(I2C1_BASE, 0x3C);
+        ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_FINISH);
         while(ROM_I2CMasterBusy(I2C1_BASE));
-        ctrl1_xl = ROM_I2CMasterDataGet(I2C1_BASE);
-        //UARTprintf("CTRL1_XL is 0x%x\n", ctrl1_xl);
 
+        UARTprintf("Finished writing to the CTRL10_C register.\n");
+
+        //writing 0x40 to TAP_CFG(0x58) - Enabling pedometer algorithm
+        //--------------------------------------------------------
+        ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, false);   //write to accelerometer
+        ROM_I2CMasterDataPut(I2C1_BASE, 0x58);
+        ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_START);
+        while(ROM_I2CMasterBusy(I2C1_BASE));
+
+        SysCtlDelay(100); //Delay by 1us
+
+        ROM_I2CMasterDataPut(I2C1_BASE, 0x40);
+        ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_FINISH);
+        while(ROM_I2CMasterBusy(I2C1_BASE));
+
+        UARTprintf("Finished writing to the TAP_CFG register.\n");
+
+
+        //writing 0x80 to INT_CTRL1(0x0D)
+        //--------------------------------------------------------
+        ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, false);   //write to accelerometer
+        ROM_I2CMasterDataPut(I2C1_BASE, 0x0D);
+        ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_START);
+        while(ROM_I2CMasterBusy(I2C1_BASE));
+
+        SysCtlDelay(100); //Delay by 1us
+
+        ROM_I2CMasterDataPut(I2C1_BASE, 0x80);
+        ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_FINISH);
+        while(ROM_I2CMasterBusy(I2C1_BASE));
+
+        UARTprintf("Finished writing to the INT_CTRL1 register.\n");
+
+        //-------------------------------------------------------
         //read the STATUS register(0x1E)
         ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, false);   //write to accelerometer
         ROM_I2CMasterDataPut(I2C1_BASE, 0x1E);
@@ -375,6 +459,9 @@ void pedometerTask(void *pvParameters)
         //UARTprintf("STATUS is 0x%x\n", status);
 
         if(status & 0x01){
+
+            //macro for verbose accelerometer data on x,y,z axes
+#ifdef ACCEL_RAW_VERBOSE
             UARTprintf("New accelerometer data available\n");
 
             //read the outx_l_xl register(0x28)
@@ -459,27 +546,77 @@ void pedometerTask(void *pvParameters)
             ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_SINGLE_RECEIVE);
             while(ROM_I2CMasterBusy(I2C1_BASE));
             outz_h_xl = ROM_I2CMasterDataGet(I2C1_BASE);
-            UARTprintf("outz_h_xl is 0x%x\n\n\n", outz_h_xl);
+            UARTprintf("outz_h_xl is 0x%x\n", outz_h_xl);
+#endif
 
+            //read the step_counter_l register(0x4B)
+            ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, false);   //write to accelerometer
+            ROM_I2CMasterDataPut(I2C1_BASE, 0x4B);
+            ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_START);
+            while(ROM_I2CMasterBusy(I2C1_BASE));
+
+            SysCtlDelay(100); //Delay by 1us
+
+            ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, true);    //read from status sensor
+            ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_SINGLE_RECEIVE);
+            while(ROM_I2CMasterBusy(I2C1_BASE));
+            step_counter_l = ROM_I2CMasterDataGet(I2C1_BASE);
+            //UARTprintf("step_counter_l is 0x%x\n", step_counter_l);
+
+            //read the step_counter_h register(0x4C)
+            ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, false);   //write to accelerometer
+            ROM_I2CMasterDataPut(I2C1_BASE, 0x4C);
+            ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_START);
+            while(ROM_I2CMasterBusy(I2C1_BASE));
+
+            SysCtlDelay(100); //Delay by 1us
+
+            ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, true);    //read from status sensor
+            ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_SINGLE_RECEIVE);
+            while(ROM_I2CMasterBusy(I2C1_BASE));
+            step_counter_h = ROM_I2CMasterDataGet(I2C1_BASE);
+            //UARTprintf("step_counter_h is 0x%x\n", step_counter_h);
+
+            step_counter = (step_counter_h << 8) | step_counter_l;
+            UARTprintf("step_counter is 0x%x\n", step_counter);
+
+            UARTprintf("ISR count is %d\n\n", isr_counter);
+
+            data_pedQueue = isr_counter;
+            messg.data = data_pedQueue;
+            messg.task_id = id;
+
+            //sending the data to the socket task using queue
+            status_pedQueue = xQueueSendToBack(pedQueue, &messg, 50);
+            //UARTprintf("Step count sent is %d\n", data_pedQueue);
+            if(status_pedQueue != pdPASS){
+                UARTprintf("Could not send data to queue.\n");
+            }
+
+            //reading gpio pin
+            GPIO_pin_a4 = GPIOPinRead(GPIO_PORTA_BASE, GPIO_PIN_4);
+            //UARTprintf("GPIO Pin A4 = %d\n\n\n", GPIO_pin_a4);
         }
     }
 }
 #endif
 
+#ifdef PULSE
 // Read heartbeat digital values
 void heartbeatTask(void *pvParameters)
 {
     //
     // Enable Timer0A.
     //
+    static uint32_t heart_rate = 0;
     TimerEnable(TIMER0_BASE, TIMER_A);
 
     while (1)
     {
 //        SysCtlDelay(10);
 //         Turn on LED 1
-        LEDWrite(0x0F, 0x01);
-        vTaskDelay(1000);
+//        LEDWrite(0x0F, 0x01);
+//        vTaskDelay(1000);
 
         // Turn on LED 2
         LEDWrite(0x0F, 0x02);
@@ -531,19 +668,28 @@ void heartbeatTask(void *pvParameters)
         SysCtlDelay(1000);
     }
 }
+#endif
 
+#ifdef SOCKET
+void socketTask(void *pvParameters)
+{
+    BaseType_t rec_ped_status;
 
+    //instanting the message packet
+    static message_t recv_messg;
 
-// Write text over the Stellaris debug interface UART port
-//void demoSerialTask(void *pvParameters)
-//{
-//
-//    for (;;)
-//    {
-//        UARTprintf("\r\nHello, world from FreeRTOS 9.0!");
-//        vTaskDelay(5000 / portTICK_PERIOD_MS);
-//    }
-//}
+    for (;;)
+    {
+        //receive data from queue with a block of 100 ticks
+        rec_ped_status = xQueueReceive(pedQueue, &recv_messg, 100);
+        if(rec_ped_status == pdPASS){
+            if(recv_messg.task_id == pedometer ){
+                UARTprintf("Source: pedometer task \nStep count received from queue: %d\n\n", recv_messg.data);
+            }
+        }
+    }
+}
+#endif
 
 /*  ASSERT() Error function
  *
@@ -556,6 +702,8 @@ void __error__(char *pcFilename, uint32_t ui32Line)
     {
     }
 }
+
+
 // Main function
 int main(void)
 {
@@ -571,37 +719,42 @@ int main(void)
 
     // Set up the UART which is connected to the virtual COM port
     UARTStdioConfig(0, 57600, SYSTEM_CLOCK);
+    GPIO_Init();
 
 #ifdef  PEDOMETER
     I2C_Init();
 #endif
-#ifdef HEART_RATE
-    GPIO_Init();
+#ifdef PULSE
     ADC_Init();
     Timer_Init();
     Comparator_Init();    
 #endif
 
+    //creating the pedometer queue
+    pedQueue = xQueueCreate(10, sizeof(message_t));
 #ifdef PEDOMETER
     // Create pedometer task
      xTaskCreate(pedometerTask, (const portCHAR *)"pedometer",
-                  configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+                  configMINIMAL_STACK_SIZE, NULL, 2, NULL);
 #endif
-#ifdef HEART_RATE
+#ifdef PULSE
     // Create heartbeat task
     xTaskCreate(heartbeatTask, (const portCHAR *)"heartbeat",
-                configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+                configMINIMAL_STACK_SIZE, NULL, 2, NULL);
+#endif
 
-//    xTaskCreate(demoSerialTask, (const portCHAR *)"Serial",
-//                configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+    xTaskCreate(socketTask, (const portCHAR *)"socket",
+                configMINIMAL_STACK_SIZE, NULL, 1, NULL);
 
     //
     // Enable processor interrupts.
     //
-    IntMasterEnable();
+    //IntMasterEnable();
 
+#ifdef PULSE
     //Enable interrupts of peripherals
     Peripheral_Int();
+#endif
 
     //Start scheduler
     vTaskStartScheduler();
