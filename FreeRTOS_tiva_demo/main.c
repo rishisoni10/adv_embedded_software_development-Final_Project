@@ -136,7 +136,7 @@ void GPIO_Init(void)
     //GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, GPIO_PIN_3);  //PB3 = LO+
     //GPIOPinTypeGPIOInput(GPIO_PORTF_BASE, GPIO_PIN_1);  //PF1 = LO-
 
-        //
+    //
     // Enable the GPIOA peripheral for INT1 signal coming from pedometer sensor
     //
     ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOA);
