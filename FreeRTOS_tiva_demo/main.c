@@ -42,14 +42,11 @@
 #define TMP102_ADDR         (0x48)
 //#define PEDOMETER           1
 #define PULSE               1
-#define SOCKET              1
+//#define SOCKET              1
 #define ACCEL_RAW_VERBOSE   1
 
 //#undef PULSE
 #undef ACCEL_RAW_VERBOSE
-
-// Global instance structure for the I2C master driver.
-//tI2CMInstance g_sI2CInst;
 
 uint32_t pulse_rate[1];
 //uint32_t heart_rate;
@@ -70,44 +67,19 @@ void socketTask(void *pvParameters);
 // The interrupt handler for the Timer0A interrupt.
 //
 //*****************************************************************************
-void
-Timer0AIntHandler(void)
+void Timer0AIntHandler(void)
 {
-    //
+    // Disable the Timer0A interrupt.
+    IntDisable(INT_TIMER0A);
+
+    // Turn off Timer0A interrupt.
+    TimerIntDisable(TIMER0_BASE, TIMER_TIMA_TIMEOUT);
+
     // Clear the timer interrupt flag.
-    //
     TimerIntClear(TIMER0_BASE, TIMER_TIMA_TIMEOUT);
-
-    //
-    // Update the periodic interrupt counter.
-    //
-//    g_ui32Counter++;
-
-    //
-    // Once NUMBER_OF_INTS interrupts have been received, turn off the
-    // TIMER0B interrupt.
-    //
-//    if(g_ui32Counter == NUMBER_OF_INTS)
-//    {
-        //
-        // Disable the Timer0A interrupt.
-        //
-        IntDisable(INT_TIMER0A);
-
-        //
-        // Turn off Timer0A interrupt.
-        //
-        TimerIntDisable(TIMER0_BASE, TIMER_TIMA_TIMEOUT);
-
-        //
-        // Clear any pending interrupt flag.
-        //
-//        TimerIntClear(TIMER0_BASE, TIMER_TIMA_TIMEOUT);
-//    }
-        UARTprintf("Timer Interrupt\n");
+    UARTprintf("Timer Interrupt\n");
 
 }
-
 
 void PortAIntHandler(void){
     taskDISABLE_INTERRUPTS();
@@ -121,37 +93,31 @@ void PortAIntHandler(void){
     taskENABLE_INTERRUPTS();
 }
 
+void COMP0_ISR(void)
+{
+    ComparatorIntDisable(COMP_BASE, 0);
+    ComparatorIntClear(COMP_BASE, 0);
+    comp_out = ComparatorValueGet(COMP_BASE, 0);
+}
+
 
 void GPIO_Init(void)
 {
     //PortB for GPIO r/w
     ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOB);
-    //ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOF);
-
+    ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOF);
 
     //PB2 = LO-; PB3 = LO+
     GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, GPIO_PIN_2|GPIO_PIN_3);
 
-
-    //GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, GPIO_PIN_3);  //PB3 = LO+
-    //GPIOPinTypeGPIOInput(GPIO_PORTF_BASE, GPIO_PIN_1);  //PF1 = LO-
-
-    //
     // Enable the GPIOA peripheral for INT1 signal coming from pedometer sensor
-    //
     ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOA);
-    //
-    // Wait for the GPIOA module to be ready.
-    //
-    while(!ROM_SysCtlPeripheralReady(SYSCTL_PERIPH_GPIOA))
-    {
-    }
 
-    //
+    // Wait for the GPIOA module to be ready.
+    while(!ROM_SysCtlPeripheralReady(SYSCTL_PERIPH_GPIOA));
+
     // Initialize the GPIO pin configuration.
-    //
     // Set pin A4 as input
-    //
     ROM_GPIOPinTypeGPIOInput(GPIO_PORTA_BASE, GPIO_PIN_4);
 
     GPIOPadConfigSet(GPIO_PORTA_BASE, GPIO_PIN_4,
@@ -160,43 +126,31 @@ void GPIO_Init(void)
     GPIOIntDisable(GPIO_PORTA_BASE, GPIO_PIN_4);        // Disable interrupt for PA4 (in case it was enabled)
     GPIOIntClear(GPIO_PORTA_BASE, GPIO_PIN_4);      // Clear pending interrupts for PF4
 
-    //
     // Register the port-level interrupt handler. This handler is the first
     // level interrupt handler for all the pin interrupts.
-    //
     GPIOIntRegister(GPIO_PORTA_BASE, PortAIntHandler);
 
-    //
     // Make pin 4 rising edge triggered interrupts.
-    //
     ROM_GPIOIntTypeSet(GPIO_PORTA_BASE, GPIO_PIN_4, GPIO_RISING_EDGE);
-
     ROM_GPIOIntEnable(GPIO_PORTA_BASE, GPIO_PIN_4);     // Enable interrupt for PF4
 }
 
 #ifdef PULSE
 void Timer_Init(void)
 {
-    //
     // The Timer0 peripheral must be enabled for use.
-    //
     SysCtlPeripheralEnable(SYSCTL_PERIPH_TIMER0);
-    //
+
     // Wait for the Timer0 module to be ready.
-    //
     while(!SysCtlPeripheralReady(SYSCTL_PERIPH_TIMER0));
 
     //Using System Clock of 120 MHz
     TimerClockSourceSet(TIMER0_BASE, TIMER_CLOCK_SYSTEM);
 
-    //
     // Configure Timer0 as a 32-bit full-width periodic timer.
-    //
     TimerConfigure(TIMER0_BASE, TIMER_CFG_PERIODIC);
 
-    //
     // Set the count time for the periodic timer (TimerA) = 30seconds
-    //
     TimerLoadSet(TIMER0_BASE, TIMER_A, output_clock_rate_hz/0.033);
 
     //Register timerA interrupt handler
@@ -206,12 +160,24 @@ void Timer_Init(void)
 
 void Comparator_Init(void)
 {
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);    //enable PortC
+    GPIOPinTypeGPIOInput(GPIO_PORTC_BASE, GPIO_PIN_6 );
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_COMP0);    //enable ACMP0
+    while(!SysCtlPeripheralReady(SYSCTL_PERIPH_COMP0)); // Wait for the COMP module to be ready.
 
+    GPIOPinTypeComparator(GPIO_PORTC_BASE, GPIO_PIN_6); //Assign Pin6 as ACMP0+
+//    GPIOPinConfigure(GPIO_PD0_C0O);
+
+    ComparatorConfigure(COMP_BASE, 0, COMP_TRIG_NONE | COMP_INT_RISE | COMP_ASRCP_REF | COMP_OUTPUT_NORMAL);
+    SysCtlDelay(1000);
+
+    ComparatorRefSet(COMP_BASE, COMP_REF_2_371875); //internal ref to 2.371875V
+    SysCtlDelay(1000);
+
+    ComparatorIntRegister(COMP_BASE, 0, COMP0_ISR);
+    ComparatorIntEnable(COMP_BASE, 0);
 }
-//#endif
-//
-//
-//#ifdef PULSE
+
 //Setup the ADC Peripheral for the Pulse Sensor
 void ADC_Init(void)
 {
@@ -229,9 +195,8 @@ void ADC_Init(void)
     // will do a single sample when the processor sends a signal to start the
     // conversion.  Each ADC module has 4 programmable sequences, sequence 0
     // to sequence 3.
-    //
     ADCSequenceConfigure(ADC0_BASE, 3, ADC_TRIGGER_PROCESSOR, 0);
-    //
+
     // Configure step 0 on sequence 3.  Sample channel 0 (ADC_CTL_CH0) in
     // single-ended mode (default) and configure the interrupt flag
     // (ADC_CTL_IE) to be set when the sample is done.  Tell the ADC logic
@@ -240,36 +205,26 @@ void ADC_Init(void)
     // sequence 0 has 8 programmable steps.  Since we are only doing a single
     // conversion using sequence 3 we will only configure step 0.  For more
     // information on the ADC sequences and steps, reference the datasheet.
-    //
     ADCSequenceStepConfigure(ADC0_BASE, 3, 0, ADC_CTL_CH0 | ADC_CTL_IE |
                              ADC_CTL_END);
 
-    //
     // Clear the interrupt status flag.  This is done to make sure the
     // interrupt flag is cleared before we sample.
-    //
     ADCIntClear(ADC0_BASE, 3);
 
-    //
     // Since sample sequence 3 is now configured, it must be enabled.
-    //
     ADCSequenceEnable(ADC0_BASE, 3);
 
 }
 
 void Peripheral_Int(void)
 {
-    //
     // Configure the Timer0B interrupt for timer timeout.
-    //
     TimerIntEnable(TIMER0_BASE, TIMER_TIMA_TIMEOUT);
 
-    //
     // Enable the Timer0B interrupt on the processor (NVIC).
-    //
     IntEnable(INT_TIMER0A);
 }
-
 #endif
 
 #ifdef PEDOMETER
@@ -317,10 +272,7 @@ void I2C_Init(void)
     //
     ROM_I2CMasterInitExpClk(I2C1_BASE, SYSTEM_CLOCK, true);     //400kbps
 }
-//#endif
-//
-//
-//#ifdef PEDOMETER
+
 void pedometerTask(void *pvParameters)
 {
     uint8_t ctrl9_xl;
@@ -350,7 +302,6 @@ void pedometerTask(void *pvParameters)
         // Turn on LED 1
         LEDWrite(0x0F, 0x01);
         vTaskDelay(1000);
-
 
         //accelerometer
         //writing 0x38 to CTRL9_XL(0x18)
@@ -605,9 +556,7 @@ void pedometerTask(void *pvParameters)
 // Read heartbeat digital values
 void heartbeatTask(void *pvParameters)
 {
-    //
     // Enable Timer0A.
-    //
     static uint32_t heart_rate = 0;
     TimerEnable(TIMER0_BASE, TIMER_A);
 
@@ -630,6 +579,7 @@ void heartbeatTask(void *pvParameters)
 //        LEDWrite(0x0F, 0x08);
 //        vTaskDelay(1000);
 
+        /*
         //Trigger ADC conversion
         ADCProcessorTrigger(ADC0_BASE, 3);
 
@@ -666,6 +616,7 @@ void heartbeatTask(void *pvParameters)
 
         //Delay for some time
         SysCtlDelay(1000);
+        */
     }
 }
 #endif
@@ -744,9 +695,10 @@ int main(void)
                 configMINIMAL_STACK_SIZE, NULL, 2, NULL);
 #endif
 
-//    xTaskCreate(socketTask, (const portCHAR *)"socket",
-//                configMINIMAL_STACK_SIZE, NULL, 1, NULL);
-
+#ifdef SOCKET
+    xTaskCreate(socketTask, (const portCHAR *)"socket",
+                configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+#endif
     //
     // Enable processor interrupts.
     //
