@@ -21,6 +21,7 @@
 #include "driverlib/rom.h"
 #include "driverlib/rom_map.h"
 #include "driverlib/gpio.h"
+#include "driverlib/comp.h"
 #include "driverlib/i2c.h"
 #include "inc/hw_memmap.h"
 #include "inc/hw_ints.h"
@@ -53,6 +54,10 @@ uint32_t pulse_rate[1];
 uint32_t output_clock_rate_hz;
 uint32_t GPIO_pin_a4;
 volatile int isr_counter;
+volatile uint32_t comp_out;
+volatile uint8_t timer_isr_count = 0;
+volatile uint8_t comp_isr_count = 0;
+volatile uint32_t number_of_heartbeats = 0;
 
 QueueHandle_t pedQueue;
 
@@ -69,6 +74,9 @@ void socketTask(void *pvParameters);
 //*****************************************************************************
 void Timer0AIntHandler(void)
 {
+    timer_isr_count++;
+    UARTprintf("Timer Interrupt. ISR count:%d\n", timer_isr_count);
+
     // Disable the Timer0A interrupt.
     IntDisable(INT_TIMER0A);
 
@@ -77,8 +85,23 @@ void Timer0AIntHandler(void)
 
     // Clear the timer interrupt flag.
     TimerIntClear(TIMER0_BASE, TIMER_TIMA_TIMEOUT);
-    UARTprintf("Timer Interrupt\n");
 
+    if(timer_isr_count == 2)
+    {
+        UARTprintf("Beats per min:%d", number_of_heartbeats);
+        timer_isr_count = 0;
+        number_of_heartbeats = 0;
+        comp_isr_count = 0;
+        TimerIntEnable(TIMER0_BASE, TIMER_TIMA_TIMEOUT);
+        IntEnable(INT_TIMER0A);
+
+    }
+    else
+    {
+        number_of_heartbeats += comp_isr_count;
+        TimerIntEnable(TIMER0_BASE, TIMER_TIMA_TIMEOUT);
+        IntEnable(INT_TIMER0A);
+    }
 }
 
 void PortAIntHandler(void){
@@ -93,11 +116,15 @@ void PortAIntHandler(void){
     taskENABLE_INTERRUPTS();
 }
 
+//Analog Comparator0 ISR
 void COMP0_ISR(void)
 {
+    comp_isr_count++;
+    UARTprintf("Comparator ISR count:%d\n", comp_isr_count);
     ComparatorIntDisable(COMP_BASE, 0);
     ComparatorIntClear(COMP_BASE, 0);
     comp_out = ComparatorValueGet(COMP_BASE, 0);
+    ComparatorIntEnable(COMP_BASE, 0);
 }
 
 
@@ -105,7 +132,7 @@ void GPIO_Init(void)
 {
     //PortB for GPIO r/w
     ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOB);
-    ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOF);
+//    ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOF);
 
     //PB2 = LO-; PB3 = LO+
     GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, GPIO_PIN_2|GPIO_PIN_3);
@@ -160,9 +187,11 @@ void Timer_Init(void)
 
 void Comparator_Init(void)
 {
-    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);    //enable PortC
-    GPIOPinTypeGPIOInput(GPIO_PORTC_BASE, GPIO_PIN_6 );
-    SysCtlPeripheralEnable(SYSCTL_PERIPH_COMP0);    //enable ACMP0
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);        //enable PortC
+    GPIOPinTypeGPIOInput(GPIO_PORTC_BASE, GPIO_PIN_6);
+    while(!SysCtlPeripheralReady(SYSCTL_PERIPH_GPIOC)); // Wait for the PortC GPIO to be ready.
+
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_COMP0);        //enable ACMP0
     while(!SysCtlPeripheralReady(SYSCTL_PERIPH_COMP0)); // Wait for the COMP module to be ready.
 
     GPIOPinTypeComparator(GPIO_PORTC_BASE, GPIO_PIN_6); //Assign Pin6 as ACMP0+
@@ -171,10 +200,12 @@ void Comparator_Init(void)
     ComparatorConfigure(COMP_BASE, 0, COMP_TRIG_NONE | COMP_INT_RISE | COMP_ASRCP_REF | COMP_OUTPUT_NORMAL);
     SysCtlDelay(1000);
 
-    ComparatorRefSet(COMP_BASE, COMP_REF_2_371875); //internal ref to 2.371875V
+    ComparatorRefSet(COMP_BASE, COMP_REF_1_1V); //internal ref to OFF
     SysCtlDelay(1000);
 
     ComparatorIntRegister(COMP_BASE, 0, COMP0_ISR);
+    SysCtlDelay(1000);
+
     ComparatorIntEnable(COMP_BASE, 0);
 }
 
@@ -617,6 +648,8 @@ void heartbeatTask(void *pvParameters)
         //Delay for some time
         SysCtlDelay(1000);
         */
+//        UARTprintf("ACMP0 value is:%d\n", ComparatorValueGet(COMP_BASE, 0));
+//        UARTprintf("ACMP0 trigger count is:%d\n", comp_isr_count);
     }
 }
 #endif
@@ -676,9 +709,9 @@ int main(void)
     I2C_Init();
 #endif
 #ifdef PULSE
-    Peripheral_Int();       //Enable interrupts of peripherals
     ADC_Init();
     Timer_Init();
+    Peripheral_Int();       //Enable interrupts of peripherals
     Comparator_Init();    
 #endif
 
