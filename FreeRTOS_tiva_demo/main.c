@@ -14,7 +14,7 @@
 #include "drivers/pinout.h"
 #include "utils/uartstdio.h"
 #include "utils/lwiplib.h"
-
+#include "utils/locator.h"
 
 // TivaWare includes
 #include "driverlib/sysctl.h"
@@ -45,6 +45,8 @@
 #define PULSE               1
 //#define SOCKET              1
 #define ACCEL_RAW_VERBOSE   1
+//#define EINVAL         0x0016
+// #define ERANGE         0x0022
 
 //#undef PULSE
 #undef ACCEL_RAW_VERBOSE
@@ -103,6 +105,85 @@ void Timer0AIntHandler(void)
         IntEnable(INT_TIMER0A);
     }
 }
+
+
+//*****************************************************************************
+//
+// Sets up the additional lwIP raw API services provided by the application.
+//
+//*****************************************************************************
+/*void
+SetupServices(void *pvArg)
+{
+    uint8_t pui8MAC[6];
+
+    //
+    // Setup the device locator service.
+    //
+    LocatorInit();
+    lwIPLocalMACGet(pui8MAC);
+    LocatorMACAddrSet(pui8MAC);
+
+    LocatorAppTitleSet("DK-TM4C129X freertos_demo");
+}
+*/
+
+//*****************************************************************************
+//
+// Initializes the lwIP tasks.
+//
+//*****************************************************************************
+uint32_t
+lwIPTaskInit(void)
+{
+    uint32_t ui32User0, ui32User1;
+    uint8_t pui8MAC[6];
+
+    //
+    // Get the MAC address from the user registers.
+    //
+    ROM_FlashUserGet(&ui32User0, &ui32User1);
+    if((ui32User0 == 0xffffffff) || (ui32User1 == 0xffffffff))
+    {
+        return(1);
+    }
+
+    //
+    // Convert the 24/24 split MAC address from NV ram into a 32/16 split MAC
+    // address needed to program the hardware registers, then program the MAC
+    // address into the Ethernet Controller registers.
+    //
+    pui8MAC[0] = ((ui32User0 >>  0) & 0xff);
+    pui8MAC[1] = ((ui32User0 >>  8) & 0xff);
+    pui8MAC[2] = ((ui32User0 >> 16) & 0xff);
+    pui8MAC[3] = ((ui32User1 >>  0) & 0xff);
+    pui8MAC[4] = ((ui32User1 >>  8) & 0xff);
+    pui8MAC[5] = ((ui32User1 >> 16) & 0xff);
+
+    //
+    // Lower the priority of the Ethernet interrupt handler.  This is required
+    // so that the interrupt handler can safely call the interrupt-safe
+    // FreeRTOS functions (specifically to send messages to the queue).
+    //
+    ROM_IntPrioritySet(INT_EMAC0, 0xC0);
+
+    //
+    // Initialize lwIP.
+    //
+    lwIPInit(output_clock_rate_hz, pui8MAC, 0, 0, 0, IPADDR_USE_DHCP);
+
+    //
+    // Setup the remaining services inside the TCP/IP thread's context.
+    //
+   // tcpip_callback(SetupServices, 0);
+
+    //
+    // Success.
+    //
+    return 0;
+}
+
+
 
 void PortAIntHandler(void){
     taskDISABLE_INTERRUPTS();
@@ -703,7 +784,7 @@ int main(void)
     ASSERT(output_clock_rate_hz == SYSTEM_CLOCK);
 
     // Initialize the GPIO pins for the Launchpad
-    PinoutSet(false, false);
+    PinoutSet(true, false);
 
     // Set up the UART which is connected to the virtual COM port
     UARTStdioConfig(0, 57600, SYSTEM_CLOCK);

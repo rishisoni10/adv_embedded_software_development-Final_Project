@@ -194,7 +194,7 @@
 // ---------- DNS options -----------
 //
 //*****************************************************************************
-#define LWIP_DNS                        0
+#define LWIP_DNS                        1
 //#define DNS_TABLE_SIZE                  4
 //#define DNS_MAX_NAME_LENGTH             256
 //#define DNS_MAX_SERVERS                 2
@@ -289,7 +289,7 @@
 //#define DEFAULT_THREAD_PRIO             1
 //#define DEFAULT_RAW_RECVMBOX_SIZE       0
 //#define DEFAULT_UDP_RECVMBOX_SIZE       0
-#define DEFAULT_TCP_RECVMBOX_SIZE       0
+#define DEFAULT_TCP_RECVMBOX_SIZE       1
 //#define DEFAULT_ACCEPTMBOX_SIZE         0
 
 //*****************************************************************************
@@ -298,20 +298,20 @@
 //
 //*****************************************************************************
 //#define LWIP_TCPIP_CORE_LOCKING         0
-#define LWIP_NETCONN                    0           // default is 1
+#define LWIP_NETCONN                    1           // default is 1
 
 //*****************************************************************************
 //
 // ---------- Socket Options ----------
 //
 //*****************************************************************************
-#define LWIP_SOCKET                     0           // default is 1
+#define LWIP_SOCKET                     1          // default is 1
 #define LWIP_COMPAT_SOCKETS             0
 //#define LWIP_POSIX_SOCKETS_IO_NAMES     1
 //#define LWIP_TCP_KEEPALIVE              0
 //#define LWIP_SO_RCVTIMEO                0
 //#define LWIP_SO_RCVBUF                  0
-#define SO_REUSE                        0
+#define SO_REUSE                        1
 
 //*****************************************************************************
 //
