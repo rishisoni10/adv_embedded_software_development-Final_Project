@@ -13,6 +13,7 @@
 #include "main.h"
 #include "drivers/pinout.h"
 #include "utils/uartstdio.h"
+#include "utils/lwiplib.h"
 
 
 // TivaWare includes
@@ -30,7 +31,6 @@
 #include "driverlib/uart.h"
 #include "driverlib/adc.h"
 #include "driverlib/timer.h"
-
 
 
 // FreeRTOS includes
@@ -127,6 +127,10 @@ void COMP0_ISR(void)
     ComparatorIntEnable(COMP_BASE, 0);
 }
 
+void UART_Init(void)
+{
+
+}
 
 void GPIO_Init(void)
 {
@@ -704,6 +708,7 @@ int main(void)
     // Set up the UART which is connected to the virtual COM port
     UARTStdioConfig(0, 57600, SYSTEM_CLOCK);
     GPIO_Init();
+    UART_Init();
 
 #ifdef  PEDOMETER
     I2C_Init();
@@ -741,3 +746,7 @@ int main(void)
     vTaskStartScheduler();
     return 0;
 }
+
+
+//FlashUserGet
+//lwIPInit
