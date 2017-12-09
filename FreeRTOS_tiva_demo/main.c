@@ -50,6 +50,7 @@
 
 //#undef PULSE
 #undef ACCEL_RAW_VERBOSE
+#undef PULSE
 
 uint32_t pulse_rate[1];
 //uint32_t heart_rate;
@@ -112,7 +113,7 @@ void Timer0AIntHandler(void)
 // Sets up the additional lwIP raw API services provided by the application.
 //
 //*****************************************************************************
-/*void
+void
 SetupServices(void *pvArg)
 {
     uint8_t pui8MAC[6];
@@ -126,7 +127,7 @@ SetupServices(void *pvArg)
 
     LocatorAppTitleSet("DK-TM4C129X freertos_demo");
 }
-*/
+
 
 //*****************************************************************************
 //
@@ -175,7 +176,7 @@ lwIPTaskInit(void)
     //
     // Setup the remaining services inside the TCP/IP thread's context.
     //
-   // tcpip_callback(SetupServices, 0);
+    tcpip_callback(SetupServices, 0);
 
     //
     // Success.
@@ -822,6 +823,15 @@ int main(void)
     // Enable processor interrupts.
     //
     //IntMasterEnable();
+
+    //
+    // Create the lwIP tasks.
+    //
+    if(lwIPTaskInit() != 0){
+        while(1){
+
+        }
+    }
 
     //Start scheduler
     vTaskStartScheduler();
