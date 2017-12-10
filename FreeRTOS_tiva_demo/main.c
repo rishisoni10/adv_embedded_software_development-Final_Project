@@ -10,6 +10,8 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdio.h>
+#include "utils/ustdlib.h"
 #include "main.h"
 #include "drivers/pinout.h"
 #include "utils/uartstdio.h"
@@ -30,6 +32,7 @@
 #include "driverlib/pin_map.h"
 #include "driverlib/uart.h"
 #include "driverlib/adc.h"
+#include "httpserver_raw/httpd.h"
 #include "driverlib/timer.h"
 
 
@@ -41,16 +44,18 @@
 
 #define LSM6DS3_ADDR        (0x6B)
 #define TMP102_ADDR         (0x48)
-//#define PEDOMETER           1
+#define PEDOMETER           1
 #define PULSE               1
-//#define SOCKET              1
+#define SOCKET              1
 #define ACCEL_RAW_VERBOSE   1
-//#define EINVAL         0x0016
-// #define ERANGE         0x0022
 
-//#undef PULSE
-#undef ACCEL_RAW_VERBOSE
+#define SYSTICKHZ               100
+#define SYSTICKMS               (1000 / SYSTICKHZ)
+#define SYSTICK_INT_PRIORITY    0x80
+
 #undef PULSE
+#undef ACCEL_RAW_VERBOSE
+#undef PEDOMETER
 
 uint32_t pulse_rate[1];
 //uint32_t heart_rate;
@@ -61,14 +66,109 @@ volatile uint32_t comp_out;
 volatile uint8_t timer_isr_count = 0;
 volatile uint8_t comp_isr_count = 0;
 volatile uint32_t number_of_heartbeats = 0;
+uint32_t ui32NewIPAddress;
 
 QueueHandle_t pedQueue;
+uint32_t g_ui32IPAddress;
 
 // Task declarations
 void pedometerTask(void *pvParameters);
 void heartbeatTask(void *pvParameters);
 void socketTask(void *pvParameters);
 //void demoSerialTask(void *pvParameters);
+
+
+//*****************************************************************************
+//
+// The UART interrupt handler.
+//
+//*****************************************************************************
+void
+UARTIntHandler(void)
+{
+    uint32_t ui32Status;
+
+    //
+    // Get the interrrupt status.
+    //
+    ui32Status = ROM_UARTIntStatus(UART3_BASE, true);
+
+    //
+    // Clear the asserted interrupts.
+    //
+    ROM_UARTIntClear(UART3_BASE, ui32Status);
+
+    //
+    // Loop while there are characters in the receive FIFO.
+    //
+    GPIOPinWrite(GPIO_PORTN_BASE, GPIO_PIN_0, GPIO_PIN_0);
+    while(ROM_UARTCharsAvail(UART3_BASE))
+    {
+        //
+        // Read the next character from the UART and write it back to the UART.
+        //
+        UARTprintf("%c", ROM_UARTCharGetNonBlocking(UART3_BASE));
+        //ROM_UARTCharPutNonBlocking(UART3_BASE,
+          //                         ROM_UARTCharGetNonBlocking(UART3_BASE));
+
+        //
+        // Blink the LED to show a character transfer is occuring.
+        //
+        GPIOPinWrite(GPIO_PORTN_BASE, GPIO_PIN_0, GPIO_PIN_0);
+
+        //
+        // Delay for 1 millisecond.  Each SysCtlDelay is about 3 clocks.
+        //
+        SysCtlDelay(output_clock_rate_hz / (1000 * 3));
+
+        //
+        // Turn off the LED
+        //
+        GPIOPinWrite(GPIO_PORTN_BASE, GPIO_PIN_0, 0);
+    }
+}
+
+
+//*****************************************************************************
+//
+// Send a string to the UART.
+//
+//*****************************************************************************
+void
+UARTSend(const uint8_t *pui8Buffer, uint32_t ui32Count)
+{
+    //
+    // Loop while there are more characters to send.
+    //
+    while(ui32Count--)
+    {
+        //
+        // Write the next character to the UART.
+        //
+        ROM_UARTCharPutNonBlocking(UART3_BASE, *pui8Buffer++);
+    }
+}
+
+
+/*
+void
+DisplayIPAddress(uint32_t ui32Addr)
+{
+    char pcBuf[16];
+
+    //
+    // Convert the IP Address into a string.
+    //
+    usprintf(pcBuf, "%d.%d.%d.%d", ui32Addr & 0xff, (ui32Addr >> 8) & 0xff,
+            (ui32Addr >> 16) & 0xff, (ui32Addr >> 24) & 0xff);
+
+    //
+    // Display the string.
+    //
+    UARTprintf(pcBuf);
+}
+*/
+
 
 //*****************************************************************************
 //
@@ -110,10 +210,109 @@ void Timer0AIntHandler(void)
 
 //*****************************************************************************
 //
+// Required by lwIP library to support any host-related timer functions.
+//
+//*****************************************************************************
+/*
+void
+lwIPHostTimerHandler(void)
+{
+    uint32_t ui32Idx, ui32NewIPAddress;
+
+    //
+    // Get the current IP address.
+    //
+    ui32NewIPAddress = lwIPLocalIPAddrGet();
+
+    //
+    // See if the IP address has changed.
+    //
+    if(ui32NewIPAddress != g_ui32IPAddress)
+    {
+        //
+        // See if there is an IP address assigned.
+        //
+        if(ui32NewIPAddress == 0xffffffff)
+        {
+            //
+            // Indicate that there is no link.
+            //
+            UARTprintf("Waiting for link.\n");
+        }
+        else if(ui32NewIPAddress == 0)
+        {
+            //
+            // There is no IP address, so indicate that the DHCP process is
+            // running.
+            //
+            UARTprintf("Waiting for IP address.\n");
+        }
+        else
+        {
+            //
+            // Display the new IP address.
+            //
+            UARTprintf("IP Address: ");
+            DisplayIPAddress(ui32NewIPAddress);
+            UARTprintf("\nOpen a browser and enter the IP address.\n");
+        }
+
+        //
+        // Save the new IP address.
+        //
+        g_ui32IPAddress = ui32NewIPAddress;
+
+        //
+        // Turn GPIO off.
+        //
+        MAP_GPIOPinWrite(GPIO_PORTN_BASE, GPIO_PIN_1, ~GPIO_PIN_1);
+    }
+
+    //
+    // If there is not an IP address.
+    //
+    if((ui32NewIPAddress == 0) || (ui32NewIPAddress == 0xffffffff))
+    {
+        //
+        // Loop through the LED animation.
+        //
+
+        for(ui32Idx = 1; ui32Idx < 17; ui32Idx++)
+        {
+
+            //
+            // Toggle the GPIO
+            //
+            MAP_GPIOPinWrite(GPIO_PORTN_BASE, GPIO_PIN_1,
+                    (MAP_GPIOPinRead(GPIO_PORTN_BASE, GPIO_PIN_1) ^
+                     GPIO_PIN_1));
+
+            SysCtlDelay(output_clock_rate_hz/(ui32Idx << 1));
+        }
+    }
+}
+*/
+//*****************************************************************************
+//
+// The interrupt handler for the SysTick interrupt.
+//
+//*****************************************************************************
+/*void
+SysTickIntHandler(void)
+{
+    //
+    // Call the lwIP timer handler.
+    //
+    lwIPTimer(SYSTICKMS);
+}
+
+*/
+//*****************************************************************************
+//
 // Sets up the additional lwIP raw API services provided by the application.
 //
 //*****************************************************************************
-void
+/*void
 SetupServices(void *pvArg)
 {
     uint8_t pui8MAC[6];
@@ -126,15 +325,24 @@ SetupServices(void *pvArg)
     LocatorMACAddrSet(pui8MAC);
 
     LocatorAppTitleSet("DK-TM4C129X freertos_demo");
-}
 
+    //
+    // Initialize a sample httpd server.
+    //
+    //httpd_init();
+    //UARTprintf("IP address: ");
+    //uint32_t ui32NewIPAddress = lwIPLocalIPAddrGet();
+    //DisplayIPAddress(ui32NewIPAddress);
+    //ui32NewIPAddress = lwIPLocalIPAddrGet();
+}
+*/
 
 //*****************************************************************************
 //
 // Initializes the lwIP tasks.
 //
 //*****************************************************************************
-uint32_t
+/*uint32_t
 lwIPTaskInit(void)
 {
     uint32_t ui32User0, ui32User1;
@@ -176,27 +384,30 @@ lwIPTaskInit(void)
     //
     // Setup the remaining services inside the TCP/IP thread's context.
     //
+
     tcpip_callback(SetupServices, 0);
 
     //
     // Success.
     //
+
     return 0;
 }
-
+*/
 
 
 void PortAIntHandler(void){
     taskDISABLE_INTERRUPTS();
-    ROM_GPIOIntDisable(GPIO_PORTA_BASE, GPIO_PIN_4);
+    ROM_GPIOIntDisable(GPIO_PORTA_BASE, GPIO_PIN_6);
     IntMasterDisable();
-    ROM_GPIOIntClear(GPIO_PORTA_BASE, GPIO_PIN_4);  // Clear interrupt flag
+    ROM_GPIOIntClear(GPIO_PORTA_BASE, GPIO_PIN_6);  // Clear interrupt flag
     isr_counter++;
-    ROM_GPIOIntTypeSet(GPIO_PORTA_BASE, GPIO_PIN_4, GPIO_RISING_EDGE);
+    ROM_GPIOIntTypeSet(GPIO_PORTA_BASE, GPIO_PIN_6, GPIO_RISING_EDGE);
     IntMasterEnable();
-    ROM_GPIOIntEnable(GPIO_PORTA_BASE, GPIO_PIN_4);
+    ROM_GPIOIntEnable(GPIO_PORTA_BASE, GPIO_PIN_6);
     taskENABLE_INTERRUPTS();
 }
+
 
 //Analog Comparator0 ISR
 void COMP0_ISR(void)
@@ -231,21 +442,21 @@ void GPIO_Init(void)
 
     // Initialize the GPIO pin configuration.
     // Set pin A4 as input
-    ROM_GPIOPinTypeGPIOInput(GPIO_PORTA_BASE, GPIO_PIN_4);
+    ROM_GPIOPinTypeGPIOInput(GPIO_PORTA_BASE, GPIO_PIN_6);
 
-    GPIOPadConfigSet(GPIO_PORTA_BASE, GPIO_PIN_4,
+    GPIOPadConfigSet(GPIO_PORTA_BASE, GPIO_PIN_6,
         GPIO_STRENGTH_2MA, GPIO_PIN_TYPE_STD_WPU);  // Enable weak pullup resistor for PF4
 
-    GPIOIntDisable(GPIO_PORTA_BASE, GPIO_PIN_4);        // Disable interrupt for PA4 (in case it was enabled)
-    GPIOIntClear(GPIO_PORTA_BASE, GPIO_PIN_4);      // Clear pending interrupts for PF4
+    GPIOIntDisable(GPIO_PORTA_BASE, GPIO_PIN_6);        // Disable interrupt for PA4 (in case it was enabled)
+    GPIOIntClear(GPIO_PORTA_BASE, GPIO_PIN_6);      // Clear pending interrupts for PF4
 
     // Register the port-level interrupt handler. This handler is the first
     // level interrupt handler for all the pin interrupts.
     GPIOIntRegister(GPIO_PORTA_BASE, PortAIntHandler);
 
     // Make pin 4 rising edge triggered interrupts.
-    ROM_GPIOIntTypeSet(GPIO_PORTA_BASE, GPIO_PIN_4, GPIO_RISING_EDGE);
-    ROM_GPIOIntEnable(GPIO_PORTA_BASE, GPIO_PIN_4);     // Enable interrupt for PF4
+    ROM_GPIOIntTypeSet(GPIO_PORTA_BASE, GPIO_PIN_6, GPIO_RISING_EDGE);
+    ROM_GPIOIntEnable(GPIO_PORTA_BASE, GPIO_PIN_6);     // Enable interrupt for PF4
 }
 
 #ifdef PULSE
@@ -748,6 +959,8 @@ void socketTask(void *pvParameters)
     //instanting the message packet
     static message_t recv_messg;
 
+    //UARTSend((uint8_t *)"\033[2JIn Socket task ", 19);
+
     for (;;)
     {
         //receive data from queue with a block of 100 ticks
@@ -785,12 +998,38 @@ int main(void)
     ASSERT(output_clock_rate_hz == SYSTEM_CLOCK);
 
     // Initialize the GPIO pins for the Launchpad
-    PinoutSet(true, false);
+    PinoutSet(false, false);
 
     // Set up the UART which is connected to the virtual COM port
     UARTStdioConfig(0, 57600, SYSTEM_CLOCK);
     GPIO_Init();
     UART_Init();
+
+    //
+    // Configure SysTick for a periodic interrupt.
+    //
+    /*MAP_SysTickPeriodSet(output_clock_rate_hz / SYSTICKHZ);
+    MAP_SysTickEnable();
+    MAP_SysTickIntEnable();
+    */
+
+    //
+    // Enable the GPIO port that is used for the on-board LED.
+    //
+    ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPION);
+
+    //
+    // Enable the GPIO pins for the LED (PN0).
+    //
+    ROM_GPIOPinTypeGPIOOutput(GPIO_PORTN_BASE, GPIO_PIN_0);
+
+    //
+    // Enable the peripherals used by this example.
+    //
+    ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_UART3);
+    ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOA);
+
+
 
 #ifdef  PEDOMETER
     I2C_Init();
@@ -822,22 +1061,74 @@ int main(void)
     //
     // Enable processor interrupts.
     //
-    //IntMasterEnable();
+    ROM_IntMasterEnable();
+
+    //
+    // Set GPIO A0 and A1 as UART pins.
+    //
+    GPIOPinConfigure(GPIO_PA4_U3RX);
+    GPIOPinConfigure(GPIO_PA5_U3TX);
+    ROM_GPIOPinTypeUART(GPIO_PORTA_BASE, GPIO_PIN_4 | GPIO_PIN_5);
+
+    //
+    // Configure the UART for 57600, 8-N-1 operation.
+    //
+    ROM_UARTConfigSetExpClk(UART3_BASE, output_clock_rate_hz, 57600,
+                            (UART_CONFIG_WLEN_8 | UART_CONFIG_STOP_ONE |
+                             UART_CONFIG_PAR_NONE));
+
+    /*while(1){
+        int k = 0;
+        while(k<10000){
+            k++;
+        }
+        //UARTSend((uint8_t *)"Enter text: ", 16);
+        while(ROM_UARTCharsAvail(UART3_BASE)){
+            GPIOPinWrite(GPIO_PORTN_BASE, GPIO_PIN_0, GPIO_PIN_0);
+            UARTprintf("%c", ROM_UARTCharGetNonBlocking(UART3_BASE));
+        }
+        GPIOPinWrite(GPIO_PORTN_BASE, GPIO_PIN_0, GPIO_PIN_0);
+    }*/
+
+    /*UARTSend((uint8_t *)"Hello ", 10);*/
+    /*while(1){
+
+            //UARTSend((uint8_t *)"Enter text: ", 16);
+            if(ROM_UARTCharsAvail(UART3_BASE)){
+                GPIOPinWrite(GPIO_PORTN_BASE, GPIO_PIN_0, GPIO_PIN_0);
+                UARTprintf("%c", ROM_UARTCharGetNonBlocking(UART3_BASE));
+            }
+            GPIOPinWrite(GPIO_PORTN_BASE, GPIO_PIN_0, 0);
+        }*/
+    //
+    // Enable the UART interrupt.
+    //
+    ROM_IntEnable(INT_UART3);
+    ROM_UARTIntEnable(UART3_BASE, UART_INT_RX | UART_INT_RT);
+
+    //UARTSend((uint8_t *)"Hi ", 3);
+    //
+    // Prompt for text to be entered.
+    //
+    //while(1){
+    //    UARTSend((uint8_t *)"Enter text: ", 16);
+    //}
+
+
 
     //
     // Create the lwIP tasks.
     //
+    /*MAP_IntPrioritySet(FAULT_SYSTICK, SYSTICK_INT_PRIORITY);
+
     if(lwIPTaskInit() != 0){
         while(1){
 
         }
-    }
+    }*/
 
     //Start scheduler
     vTaskStartScheduler();
     return 0;
 }
 
-
-//FlashUserGet
-//lwIPInit

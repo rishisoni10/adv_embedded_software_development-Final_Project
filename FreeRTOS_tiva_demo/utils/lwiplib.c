@@ -240,7 +240,7 @@ tHardwareTimerHandler g_pfnTimerHandler;
 // Host and lwIP periodic callback functions.
 //
 //*****************************************************************************
-#if NO_SYS
+#if !NO_SYS
 uint32_t g_ui32LocalTimer = 0;
 #endif
 
@@ -347,7 +347,7 @@ static uint32_t g_ui32IPMode = IPADDR_USE_STATIC;
 //
 //*****************************************************************************
 #if LWIP_AUTOIP || LWIP_DHCP
-static bool g_bLinkActive = false;
+static bool g_bLinkActive = true;
 #endif
 
 //*****************************************************************************
@@ -966,7 +966,7 @@ lwIPTimerCallbackRegister(tHardwareTimerHandler pfnTimerFunc)
 //! \return None.
 //
 //*****************************************************************************
-#if NO_SYS
+#if !NO_SYS
 void
 lwIPTimer(uint32_t ui32TimeMS)
 {
