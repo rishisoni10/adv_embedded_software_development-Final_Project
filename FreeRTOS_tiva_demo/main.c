@@ -747,7 +747,7 @@ void pedometerTask(void *pvParameters)
                         }
                     }
                     else if(recv_pulse_msg.type == RESPONSE_MESSAGE){
-                        UARTprintf("Obtained a response from PULSE task and bpm is %d.\n", recv_pulse_msg.data);
+                        //UARTprintf("Obtained a response from PULSE task and bpm is %d.\n", recv_pulse_msg.data);
                     }
                 }
                 memset(&recv_pulse_msg, 0, sizeof(recv_pulse_msg));
@@ -858,7 +858,7 @@ void pulseTask(void *pvParameters)
                     }
                 }
                 else if(recv_ped_msg.type == RESPONSE_MESSAGE){
-                    UARTprintf("Obtained a response from PEDOMETER task and step count is %d.\n", recv_ped_msg.data);
+                    //UARTprintf("Obtained a response from PEDOMETER task and step count is %d.\n", recv_ped_msg.data);
                 }
             }
             memset(&recv_ped_msg, 0, sizeof(recv_ped_msg));
@@ -888,6 +888,8 @@ void pulseTask(void *pvParameters)
 #ifdef SERIAL
 void serialTask(void *pvParameters)
 {
+    uint8_t msg_len;
+    char buffer[100];
 #ifdef PEDOMETER
     BaseType_t rec_ped_status;
 #endif
@@ -904,13 +906,18 @@ void serialTask(void *pvParameters)
     {
 #ifdef PEDOMETER
         memset(&recv_msg, 0, sizeof(recv_msg));
-
+        memset(buffer, 0, 100);
         //receive data from queue with a block of 100 ticks
-        rec_ped_status = xQueueReceive(pedQueue, &recv_msg, 100);
+        rec_ped_status = xQueueReceive(pedQueue, &recv_msg, 50);
         if(rec_ped_status == pdPASS){
             if(recv_msg.source_task == pedometer ){
                 if(recv_msg.log_level == LOG_INFO_DATA && recv_msg.type == LOG_MESSAGE){
                     UARTprintf("Source: pedometer task. Step count received from queue: %d\n\n", recv_msg.data);
+                    sprintf(buffer,"Source: pedometer task. Step count received from queue: %d\n*", recv_msg.data);
+                    msg_len = strlen(buffer)+1;
+                   UARTprintf("msg_len=%d\n", msg_len);
+                   UARTSend(&msg_len, 1);
+                   UARTSend(buffer, msg_len);
                 }
                 else if(recv_msg.msg_rqst_type == PED_STARTUP){
                     UARTprintf("Source: main task. Pedometer task is spawned\n");
@@ -925,11 +932,11 @@ void serialTask(void *pvParameters)
         memset(&recv_msg, 0, sizeof(recv_msg));
 
 #ifdef PULSE
-        rec_pulse_status = xQueueReceive(pulseQueue, &recv_msg, 100);
+        rec_pulse_status = xQueueReceive(pulseQueue, &recv_msg, 50);
         if(rec_pulse_status == pdPASS){
             if(recv_msg.source_task == pulse_rate ){
                 if(recv_msg.log_level == LOG_INFO_DATA){
-                    UARTprintf("Source: pulse task \nBPM received from queue: %d\n\n", recv_msg.data);
+                    UARTprintf("Source: pulse task. BPM received from queue: %d\n\n", recv_msg.data);
                 }
                 else if(recv_msg.msg_rqst_type == PULSE_STARTUP){
                     UARTprintf("Source: main task. Pulse task is spawned\n");
