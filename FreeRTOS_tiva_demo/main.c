@@ -56,7 +56,7 @@
 
 
 #undef ACCEL_RAW_VERBOSE
-#undef PULSE
+#undef PEDOMETER
 
 uint32_t output_clock_rate_hz;
 uint32_t GPIO_pin_a4;
@@ -153,26 +153,6 @@ UARTSend(const uint8_t *pui8Buffer, uint32_t ui32Count)
         ROM_UARTCharPutNonBlocking(UART3_BASE, *pui8Buffer++);
     }
 }
-
-
-/*
-void
-DisplayIPAddress(uint32_t ui32Addr)
-{
-    char pcBuf[16];
-
-    //
-    // Convert the IP Address into a string.
-    //
-    usprintf(pcBuf, "%d.%d.%d.%d", ui32Addr & 0xff, (ui32Addr >> 8) & 0xff,
-            (ui32Addr >> 16) & 0xff, (ui32Addr >> 24) & 0xff);
-
-    //
-    // Display the string.
-    //
-    UARTprintf(pcBuf);
-}
-*/
 
 
 //*****************************************************************************
@@ -324,7 +304,7 @@ void Timer_Init(void)
 void Comparator_Init(void)
 {
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);        //enable PortC
-    GPIOPinTypeGPIOInput(GPIO_PORTC_BASE, GPIO_PIN_6);
+    GPIOPinTypeGPIOInput(GPIO_PORTC_BASE, GPIO_PIN_6);  //PC6
     while(!SysCtlPeripheralReady(SYSCTL_PERIPH_GPIOC)); // Wait for the PortC GPIO to be ready.
 
     SysCtlPeripheralEnable(SYSCTL_PERIPH_COMP0);        //enable ACMP0
@@ -774,6 +754,7 @@ void serialTask(void *pvParameters)
 
     for (;;)
     {
+#ifdef PEDOMETER
         memset(&recv_msg, 0, sizeof(recv_msg));
 
         //receive data from queue with a block of 100 ticks
@@ -788,6 +769,7 @@ void serialTask(void *pvParameters)
                 }
             }
         }
+#endif
 
         memset(&recv_msg, 0, sizeof(recv_msg));
 
@@ -796,7 +778,7 @@ void serialTask(void *pvParameters)
         if(rec_pulse_status == pdPASS){
             if(recv_msg.source_task == pulse_rate ){
                 if(recv_msg.log_level == LOG_INFO_DATA){
-                    UARTprintf("Source: pulse task \nStep count received from queue: %d\n\n", recv_msg.data);
+                    UARTprintf("Source: pulse task \nBPM received from queue: %d\n\n", recv_msg.data);
                 }
                 else if(recv_msg.msg_rqst_type == PULSE_STARTUP){
                     UARTprintf("Source: main task. Pulse task is spawned\n");
