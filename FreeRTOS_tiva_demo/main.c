@@ -56,7 +56,6 @@
 
 
 #undef ACCEL_RAW_VERBOSE
-//#undef PEDOMETER
 
 uint32_t output_clock_rate_hz;
 uint32_t GPIO_pin_a4;
@@ -73,6 +72,8 @@ uint32_t ui32NewIPAddress;
 
 QueueHandle_t pedQueue;
 QueueHandle_t pulseQueue;
+QueueHandle_t sharedQueue1;
+QueueHandle_t sharedQueue2;
 
 uint32_t g_ui32IPAddress;
 
@@ -433,6 +434,7 @@ void pedometerTask(void *pvParameters)
     uint8_t ctrl9_xl;
     uint8_t ctrl1_xl;
     uint8_t status;
+    static int count = 0;
 #ifdef ACCEL_RAW_VERBOSE
     uint8_t outx_l_xl;
     uint8_t outx_h_xl;
@@ -447,9 +449,14 @@ void pedometerTask(void *pvParameters)
 
     uint32_t data_pedQueue = 0;
     BaseType_t status_pedQueue;
+    BaseType_t status_recv_pulseQueue;
+    BaseType_t status_send_pulseQueue;
 
     //instanting the message packet
    static message ped_msg;
+
+   static message recv_pulse_msg;
+   static message send_pulse_msg;
 
    //writing 0x38 to CTRL9_XL(0x18)
    //--------------------------------------------------------
@@ -547,6 +554,8 @@ void pedometerTask(void *pvParameters)
         // Turn on LED 1
         LEDWrite(0x0F, 0x01);
         vTaskDelay(1000);
+
+        count++;
 
         //-------------------------------------------------------
         //read the STATUS register(0x1E)
@@ -683,9 +692,66 @@ void pedometerTask(void *pvParameters)
             //UARTprintf("step_counter_h is 0x%x\n", step_counter_h);
 
             step_counter = (step_counter_h << 8) | step_counter_l;
-            UARTprintf("step_counter is 0x%x\n", step_counter);
+            //UARTprintf("step_counter is 0x%x\n", step_counter);
 
             //UARTprintf("ISR count is %d\n\n", isr_counter);
+
+
+            if(count%15==0){
+                send_pulse_msg.source_task = pedometer;
+                send_pulse_msg.log_level = LOG_REQUEST;
+                send_pulse_msg.request_type = PULSE_REQUEST;
+                send_pulse_msg.msg_rqst_type = PED_DATA;
+                send_pulse_msg.type = REQUEST_MESSAGE;
+                //TODO : Figure out timestamps
+
+                //sending the data to the socket task using queue
+                status_send_pulseQueue = xQueueSendToBack(sharedQueue1, &send_pulse_msg, 50);
+                if(status_send_pulseQueue != pdPASS){
+                    UARTprintf("Could not send data to shared queue1.\n");
+                }
+                else{
+                    //UARTprintf("Sent a data request to the PULSE task.\n");
+                }
+
+                //also send a copy of the request to the serial task
+                status_send_pulseQueue = xQueueSendToBack(pedQueue, &send_pulse_msg, 50);
+                if(status_send_pulseQueue != pdPASS){
+                    UARTprintf("Could not send data to pedometer queue.\n");
+                }
+            }
+
+            memset(&send_pulse_msg, 0, sizeof(send_pulse_msg));
+
+            status_recv_pulseQueue = xQueueReceive(sharedQueue2, &recv_pulse_msg, 50);
+            if(status_recv_pulseQueue == pdPASS){
+                if(recv_pulse_msg.source_task == pulse_rate ){
+                    if(recv_pulse_msg.type == REQUEST_MESSAGE){
+                        //UARTprintf("Obtained request for pedometer data\n");
+                        memset(&recv_pulse_msg, 0, sizeof(recv_pulse_msg));
+                        recv_pulse_msg.data = data_pedQueue;
+                        recv_pulse_msg.source_task = pedometer;
+                        recv_pulse_msg.log_level = LOG_INFO_DATA;
+                        recv_pulse_msg.request_type = NOT_REQUEST;
+                        recv_pulse_msg.msg_rqst_type = PED_DATA;
+                        recv_pulse_msg.type = RESPONSE_MESSAGE;
+                        //TODO : Figure out timestamps
+
+                        //sending the data to the socket task using queue
+                        status_send_pulseQueue = xQueueSendToBack(sharedQueue1, &recv_pulse_msg, 50);
+                        if(status_send_pulseQueue != pdPASS){
+                            UARTprintf("Could not send response to shared queue1.\n");
+                        }
+                        else{
+                            //UARTprintf("Sent a response to the PULSE task.\n");
+                        }
+                    }
+                    else if(recv_pulse_msg.type == RESPONSE_MESSAGE){
+                        UARTprintf("Obtained a response from PULSE task and bpm is %d.\n", recv_pulse_msg.data);
+                    }
+                }
+                memset(&recv_pulse_msg, 0, sizeof(recv_pulse_msg));
+            }
 
             data_pedQueue = step_counter;
             ped_msg.data = data_pedQueue;
@@ -703,6 +769,8 @@ void pedometerTask(void *pvParameters)
                 UARTprintf("Could not send data to pedometer queue.\n");
             }
 
+            memset(&ped_msg, 0, sizeof(ped_msg));
+
             //reading gpio pin
             GPIO_pin_a4 = GPIOPinRead(GPIO_PORTA_BASE, GPIO_PIN_4);
             //UARTprintf("GPIO Pin A4 = %d\n\n\n", GPIO_pin_a4);
@@ -719,16 +787,82 @@ void pulseTask(void *pvParameters)
     static message pulse_msg;
     BaseType_t status_pulseQueue;
 
+    static int count1 = 0;
+
+    BaseType_t status_recv_pedQueue;
+    BaseType_t status_send_pedQueue;
+
+   static message recv_ped_msg;
+   static message send_ped_msg;
+
     // Enable Timer0A.
     TimerEnable(TIMER0_BASE, TIMER_A);
 
     while (1)
     {
+        count1++;
+
         // Turn on LED 2
         LEDWrite(0x0F, 0x02);
         vTaskDelay(1000);
 
-        UARTprintf("Current BPM is:%d\n", bpm_cpy);
+        //UARTprintf("Current BPM is:%d\n", bpm_cpy);
+
+        if(count1%25==0){
+            send_ped_msg.source_task = pulse_rate;
+            send_ped_msg.log_level = LOG_REQUEST;
+            send_ped_msg.request_type = PED_REQUEST;
+            send_ped_msg.msg_rqst_type = PULSE_DATA;
+            send_ped_msg.type = REQUEST_MESSAGE;
+            //TODO : Figure out timestamps
+
+            //sending the data to the socket task using queue
+            status_send_pedQueue = xQueueSendToBack(sharedQueue2, &send_ped_msg, 50);
+            if(status_send_pedQueue != pdPASS){
+                UARTprintf("Could not send data to shared queue2.\n");
+            }
+            else{
+                //UARTprintf("Sent a data request to the PEDOMETER task.\n");
+            }
+
+            //also send a copy of the request to the serial task
+            status_send_pedQueue = xQueueSendToBack(pulseQueue, &send_ped_msg, 50);
+            if(status_send_pedQueue != pdPASS){
+                UARTprintf("Could not send data to pulse queue.\n");
+            }
+        }
+
+        memset(&send_ped_msg, 0, sizeof(send_ped_msg));
+
+        status_recv_pedQueue = xQueueReceive(sharedQueue1, &recv_ped_msg, 50);
+        if(status_recv_pedQueue == pdPASS){
+            if(recv_ped_msg.source_task == pedometer ){
+                if(recv_ped_msg.type == REQUEST_MESSAGE){
+                    UARTprintf("Obtained request for pulse rate data\n");
+                    memset(&recv_ped_msg, 0, sizeof(recv_ped_msg));
+                    recv_ped_msg.data = bpm_cpy;
+                    recv_ped_msg.source_task = pulse_rate;
+                    recv_ped_msg.log_level = LOG_INFO_DATA;
+                    recv_ped_msg.request_type = NOT_REQUEST;
+                    recv_ped_msg.msg_rqst_type = PULSE_DATA;
+                    recv_ped_msg.type = RESPONSE_MESSAGE;
+                    //TODO : Figure out timestamps
+
+                    //sending the data to the socket task using queue
+                    status_send_pedQueue = xQueueSendToBack(sharedQueue2, &recv_ped_msg, 50);
+                    if(status_send_pedQueue != pdPASS){
+                        UARTprintf("Could not send response to shared queue2.\n");
+                    }
+                    else{
+                        //UARTprintf("Sent a response to the PEDOMETER task.\n");
+                    }
+                }
+                else if(recv_ped_msg.type == RESPONSE_MESSAGE){
+                    UARTprintf("Obtained a response from PEDOMETER task and step count is %d.\n", recv_ped_msg.data);
+                }
+            }
+            memset(&recv_ped_msg, 0, sizeof(recv_ped_msg));
+        }
 
         pulse_msg.data = bpm_cpy;
         pulse_msg.source_task = pulse_rate;
@@ -744,6 +878,8 @@ void pulseTask(void *pvParameters)
         if(status_pulseQueue != pdPASS){
             UARTprintf("Could not send data to pulse queue.\n");
         }
+
+        memset(&pulse_msg, 0, sizeof(pulse_msg));
 
     }
 }
@@ -773,11 +909,14 @@ void serialTask(void *pvParameters)
         rec_ped_status = xQueueReceive(pedQueue, &recv_msg, 100);
         if(rec_ped_status == pdPASS){
             if(recv_msg.source_task == pedometer ){
-                if(recv_msg.log_level == LOG_INFO_DATA){
+                if(recv_msg.log_level == LOG_INFO_DATA && recv_msg.type == LOG_MESSAGE){
                     UARTprintf("Source: pedometer task. Step count received from queue: %d\n\n", recv_msg.data);
                 }
                 else if(recv_msg.msg_rqst_type == PED_STARTUP){
                     UARTprintf("Source: main task. Pedometer task is spawned\n");
+                }
+                else if(recv_msg.type == REQUEST_MESSAGE){
+                    UARTprintf("A request message from pulse rate task to pedometer task.\n");
                 }
             }
         }
@@ -794,6 +933,9 @@ void serialTask(void *pvParameters)
                 }
                 else if(recv_msg.msg_rqst_type == PULSE_STARTUP){
                     UARTprintf("Source: main task. Pulse task is spawned\n");
+                }
+                else if(recv_msg.type == REQUEST_MESSAGE){
+                    UARTprintf("A request message from pedometer task to pulse rate task.\n");
                 }
             }
         }
@@ -841,21 +983,12 @@ int main(void)
     GPIO_Init();
 
     //
-    // Enable the GPIO port that is used for the on-board LED.
+    // Enable the GPIO port and pin that is used for the on-board LED.
     //
     ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPION);
-
-    //
-    // Enable the GPIO pins for the LED (PN0).
-    //
     ROM_GPIOPinTypeGPIOOutput(GPIO_PORTN_BASE, GPIO_PIN_0);
 
-    //
-    // Enable the peripherals used by this example.
-    //
-
     UART_Init();
-
 
 #ifdef  PEDOMETER
     I2C_Init();
@@ -866,6 +999,10 @@ int main(void)
     Peripheral_Int();       //Enable interrupts of peripherals
     Comparator_Init();    
 #endif
+
+    //creating the shared queues
+    sharedQueue1 = xQueueCreate(10, sizeof(message));
+    sharedQueue2 = xQueueCreate(10, sizeof(message));
 
 #ifdef PEDOMETER
     //creating the pedometer queue
@@ -921,40 +1058,6 @@ int main(void)
     // Enable processor interrupts.
     //
     ROM_IntMasterEnable();
-
-
-    /*while(1){
-        int k = 0;
-        while(k<10000){
-            k++;
-        }
-        //UARTSend((uint8_t *)"Enter text: ", 16);
-        while(ROM_UARTCharsAvail(UART3_BASE)){
-            GPIOPinWrite(GPIO_PORTN_BASE, GPIO_PIN_0, GPIO_PIN_0);
-            UARTprintf("%c", ROM_UARTCharGetNonBlocking(UART3_BASE));
-        }
-        GPIOPinWrite(GPIO_PORTN_BASE, GPIO_PIN_0, GPIO_PIN_0);
-    }*/
-
-    /*UARTSend((uint8_t *)"Hello ", 10);*/
-    /*while(1){
-
-            //UARTSend((uint8_t *)"Enter text: ", 16);
-            if(ROM_UARTCharsAvail(UART3_BASE)){
-                GPIOPinWrite(GPIO_PORTN_BASE, GPIO_PIN_0, GPIO_PIN_0);
-                UARTprintf("%c", ROM_UARTCharGetNonBlocking(UART3_BASE));
-            }
-            GPIOPinWrite(GPIO_PORTN_BASE, GPIO_PIN_0, 0);
-        }*/
-
-
-    //
-    // Prompt for text to be entered.
-    //
-    //while(1){
-    //    UARTSend((uint8_t *)"Enter text: ", 16);
-    //}
-
 
     //Start scheduler
     vTaskStartScheduler();
