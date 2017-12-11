@@ -18,6 +18,8 @@
 #include "utils/uartstdio.h"
 #include "utils/lwiplib.h"
 #include "utils/locator.h"
+#include "utils/ustdlib.h"
+
 
 // TivaWare includes
 #include "driverlib/sysctl.h"
@@ -33,6 +35,8 @@
 #include "driverlib/pin_map.h"
 #include "driverlib/uart.h"
 #include "driverlib/adc.h"
+#include "driverlib/hibernate.h"
+
 #include "httpserver_raw/httpd.h"
 #include "driverlib/timer.h"
 
@@ -53,6 +57,12 @@
 #define SYSTICKHZ               100
 #define SYSTICKMS               (1000 / SYSTICKHZ)
 #define SYSTICK_INT_PRIORITY    0x80
+
+#define CURRENT_HOUR    (14)
+#define CURRENT_MIN     (30)
+#define CURRENT_MON     (12)
+#define CURRENT_DAY     (11)
+#define CURRENT_YEAR    (2017)
 
 
 #undef ACCEL_RAW_VERBOSE
@@ -154,7 +164,7 @@ UARTSend(const uint8_t *pui8Buffer, uint32_t ui32Count)
         //
         // Write the next character to the UART.
         //
-        ROM_UARTCharPutNonBlocking(UART3_BASE, *pui8Buffer++);
+        ROM_UARTCharPut(UART3_BASE, *pui8Buffer++);
     }
 }
 
@@ -226,6 +236,80 @@ void COMP0_ISR(void)
     ComparatorIntEnable(COMP_BASE, 0);
     taskENABLE_INTERRUPTS();
 }
+
+
+// This function writes the requested date and time to the calendar logic of
+// hibernation module.
+void DateTimeSet(void)
+{
+    struct tm sTime;
+
+    //
+    // Get the latest date and time.  This is done here so that unchanged
+    // parts of date and time can be written back as is.
+    //
+    HibernateCalendarGet(&sTime);
+
+    //
+    // Set the date and time values that are to be updated.
+    //
+    sTime.tm_min = CURRENT_MIN;
+    sTime.tm_hour = CURRENT_HOUR;
+    sTime.tm_mon = CURRENT_MON;
+    sTime.tm_mday = CURRENT_DAY;
+    sTime.tm_year = 100 + CURRENT_YEAR;
+
+    //
+    // Update the calendar logic of hibernation module with the requested data.
+    //
+    HibernateCalendarSet(&sTime);
+}
+
+
+//Hibernation module Init
+void Hibernate_Init(void)
+{
+    //
+    // Enable the hibernate module.
+    //
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_HIBERNATE);
+    if(HibernateIsActive())
+    {
+        //
+        // Read the status bits to see what caused the wake.  Clear the wake
+        // source so that the device can be put into hibernation again.
+        //
+        uint32_t ui32Status = HibernateIntStatus(0);
+        HibernateIntClear(ui32Status);
+    }
+
+        //
+        // Configure Hibernate module clock.
+        //
+        HibernateEnableExpClk(output_clock_rate_hz);
+
+        //
+        // Configure the module clock source.
+        //
+        HibernateClockConfig(HIBERNATE_OSC_LOWDRIVE);
+
+        //
+        // Enable RTC mode.
+        //
+        HibernateRTCEnable();
+
+        //
+        // Configure the hibernate module counter to 24-hour calendar mode.
+        //
+        HibernateCounterMode(HIBERNATE_COUNTER_24HR);
+
+        DateTimeSet();
+
+}
+
+
+
+
 
 //UART setup
 void UART_Init(void)
@@ -798,7 +882,7 @@ void pulseTask(void *pvParameters)
     // Enable Timer0A.
     TimerEnable(TIMER0_BASE, TIMER_A);
 
-    while (1)
+    for (;;)
     {
         count1++;
 
@@ -890,6 +974,8 @@ void serialTask(void *pvParameters)
 {
     uint8_t msg_len;
     char buffer[100];
+    struct tm curr_time;
+
 #ifdef PEDOMETER
     BaseType_t rec_ped_status;
 #endif
@@ -912,12 +998,15 @@ void serialTask(void *pvParameters)
         if(rec_ped_status == pdPASS){
             if(recv_msg.source_task == pedometer ){
                 if(recv_msg.log_level == LOG_INFO_DATA && recv_msg.type == LOG_MESSAGE){
+                    HibernateCalendarGet(&curr_time);
+
                     UARTprintf("Source: pedometer task. Step count received from queue: %d\n\n", recv_msg.data);
+                    UARTprintf("Time in HH:%d\tTime in MM:%d\tDay:%d\tMonth:%d\n", curr_time.tm_hour, curr_time.tm_min, curr_time.tm_mday, curr_time.tm_mon);
                     sprintf(buffer,"Source: pedometer task. Step count received from queue: %d\n*", recv_msg.data);
-                    msg_len = strlen(buffer)+1;
-                   UARTprintf("msg_len=%d\n", msg_len);
-                   UARTSend(&msg_len, 1);
-                   UARTSend(buffer, msg_len);
+//                    msg_len = strlen(buffer)+1;
+//                   UARTprintf("msg_len=%d\n", msg_len);
+//                   UARTSend(&msg_len, 1);
+                   UARTSend((uint8_t*)buffer, msg_len);
                 }
                 else if(recv_msg.msg_rqst_type == PED_STARTUP){
                     UARTprintf("Source: main task. Pedometer task is spawned\n");
@@ -1004,7 +1093,8 @@ int main(void)
     ADC_Init();
     Timer_Init();
     Peripheral_Int();       //Enable interrupts of peripherals
-    Comparator_Init();    
+    Comparator_Init();
+    Hibernate_Init();
 #endif
 
     //creating the shared queues
