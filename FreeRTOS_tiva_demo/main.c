@@ -16,8 +16,6 @@
 #include "main.h"
 #include "drivers/pinout.h"
 #include "utils/uartstdio.h"
-#include "utils/lwiplib.h"
-#include "utils/locator.h"
 #include "utils/ustdlib.h"
 
 
@@ -36,8 +34,6 @@
 #include "driverlib/uart.h"
 #include "driverlib/adc.h"
 #include "driverlib/hibernate.h"
-
-#include "httpserver_raw/httpd.h"
 #include "driverlib/timer.h"
 
 
@@ -333,8 +329,8 @@ void UART_Init(void)
     //
     // Enable the UART interrupt.
     //
-    ROM_IntEnable(INT_UART3);
-    ROM_UARTIntEnable(UART3_BASE, UART_INT_RX | UART_INT_RT);
+    //ROM_IntEnable(INT_UART3);
+    //ROM_UARTIntEnable(UART3_BASE, UART_INT_RX | UART_INT_RT);
 }
 
 void GPIO_Init(void)
@@ -787,6 +783,7 @@ void pedometerTask(void *pvParameters)
                 send_pulse_msg.request_type = PULSE_REQUEST;
                 send_pulse_msg.msg_rqst_type = PED_DATA;
                 send_pulse_msg.type = REQUEST_MESSAGE;
+                send_pulse_msg.data = 32762;  //placeholder data
                 //TODO : Figure out timestamps
 
                 //sending the data to the socket task using queue
@@ -898,6 +895,7 @@ void pulseTask(void *pvParameters)
             send_ped_msg.request_type = PED_REQUEST;
             send_ped_msg.msg_rqst_type = PULSE_DATA;
             send_ped_msg.type = REQUEST_MESSAGE;
+            send_ped_msg.data = 32761;  //placeholder data
             //TODO : Figure out timestamps
 
             //sending the data to the socket task using queue
@@ -998,21 +996,43 @@ void serialTask(void *pvParameters)
         if(rec_ped_status == pdPASS){
             if(recv_msg.source_task == pedometer ){
                 if(recv_msg.log_level == LOG_INFO_DATA && recv_msg.type == LOG_MESSAGE){
-                    HibernateCalendarGet(&curr_time);
+                    //UARTprintf("Source: pedometer task. Step count is %d\n", recv_msg.data);
 
-                    UARTprintf("Source: pedometer task. Step count received from queue: %d\n\n", recv_msg.data);
-                    UARTprintf("Time in HH:%d\tTime in MM:%d\tDay:%d\tMonth:%d\n", curr_time.tm_hour, curr_time.tm_min, curr_time.tm_mday, curr_time.tm_mon);
-                    sprintf(buffer,"Source: pedometer task. Step count received from queue: %d\n*", recv_msg.data);
-//                    msg_len = strlen(buffer)+1;
-//                   UARTprintf("msg_len=%d\n", msg_len);
-//                   UARTSend(&msg_len, 1);
-                   UARTSend((uint8_t*)buffer, msg_len);
+                    memset(buffer, 0, sizeof(buffer));
+                    sprintf(buffer, "Log_level: %d|Request_type: %d|Source_task: %d\n", recv_msg.log_level, recv_msg.request_type, recv_msg.source_task);
+                    //UARTprintf("%s", buffer);
+                    UARTSend((uint8_t*)buffer, msg_len);
+
+                    memset(buffer, 0, sizeof(buffer));
+                    sprintf(buffer, "Message_type: %d|Msg_rqst_type: %d|Data: %d\n", recv_msg.type, recv_msg.msg_rqst_type, recv_msg.data);
+                    //UARTprintf("%s", buffer);
+                    UARTSend((uint8_t*)buffer, msg_len);
                 }
                 else if(recv_msg.msg_rqst_type == PED_STARTUP){
-                    UARTprintf("Source: main task. Pedometer task is spawned\n");
+                    //UARTprintf("Source: main task. Pedometer task is spawned\n");
+
+                    memset(buffer, 0, sizeof(buffer));
+                    sprintf(buffer, "Log_level: %d|Request_type: %d|Source_task: %d\n", recv_msg.log_level, recv_msg.request_type, recv_msg.source_task);
+                    //UARTprintf("%s", buffer);
+                    UARTSend((uint8_t*)buffer, msg_len);
+
+                    memset(buffer, 0, sizeof(buffer));
+                    sprintf(buffer, "Message_type: %d|Msg_rqst_type: %d|Data: %d\n", recv_msg.type, recv_msg.msg_rqst_type, recv_msg.data);
+                    //UARTprintf("%s", buffer);
+                    UARTSend((uint8_t*)buffer, msg_len);
                 }
                 else if(recv_msg.type == REQUEST_MESSAGE){
                     UARTprintf("A request message from pulse rate task to pedometer task.\n");
+
+                    memset(buffer, 0, sizeof(buffer));
+                    sprintf(buffer, "Log_level: %d|Request_type: %d|Source_task: %d\n", recv_msg.log_level, recv_msg.request_type, recv_msg.source_task);
+                    //UARTprintf("%s", buffer);
+                    UARTSend((uint8_t*)buffer, msg_len);
+
+                    memset(buffer, 0, sizeof(buffer));
+                    sprintf(buffer, "Message_type: %d|Msg_rqst_type: %d|Data: %d\n", recv_msg.type, recv_msg.msg_rqst_type, recv_msg.data);
+                    //UARTprintf("%s", buffer);
+                    UARTSend((uint8_t*)buffer, msg_len);
                 }
             }
         }
@@ -1025,13 +1045,13 @@ void serialTask(void *pvParameters)
         if(rec_pulse_status == pdPASS){
             if(recv_msg.source_task == pulse_rate ){
                 if(recv_msg.log_level == LOG_INFO_DATA){
-                    UARTprintf("Source: pulse task. BPM received from queue: %d\n\n", recv_msg.data);
+                    //UARTprintf("Source: pulse task. BPM received from queue: %d\n\n", recv_msg.data);
                 }
                 else if(recv_msg.msg_rqst_type == PULSE_STARTUP){
-                    UARTprintf("Source: main task. Pulse task is spawned\n");
+                    //UARTprintf("Source: main task. Pulse task is spawned\n");
                 }
                 else if(recv_msg.type == REQUEST_MESSAGE){
-                    UARTprintf("A request message from pedometer task to pulse rate task.\n");
+                    //UARTprintf("A request message from pedometer task to pulse rate task.\n");
                 }
             }
         }
@@ -1114,6 +1134,7 @@ int main(void)
      main_msg.msg_rqst_type = PED_STARTUP;
      main_msg.request_type = NOT_REQUEST;
      main_msg.type = SYSTEM_INIT_MESSAGE;
+     main_msg.data = 32763;
      //TODO : Figure out timestamps
 
      //sending the data to the socket task using queue
@@ -1136,6 +1157,7 @@ int main(void)
     main_msg.msg_rqst_type = PULSE_STARTUP;
     main_msg.request_type = NOT_REQUEST;
     main_msg.type = SYSTEM_INIT_MESSAGE;
+    main_msg.data = 32764;
     //TODO : Figure out timestamps
 
     //sending the data to the socket task using queue
