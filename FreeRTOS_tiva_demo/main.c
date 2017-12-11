@@ -56,7 +56,7 @@
 
 
 #undef ACCEL_RAW_VERBOSE
-#undef PEDOMETER
+//#undef PEDOMETER
 
 uint32_t output_clock_rate_hz;
 uint32_t GPIO_pin_a4;
@@ -79,7 +79,7 @@ uint32_t g_ui32IPAddress;
 // Task declarations
 void pedometerTask(void *pvParameters);
 void pulseTask(void *pvParameters);
-void socketTask(void *pvParameters);
+void serialTask(void *pvParameters);
 //void demoSerialTask(void *pvParameters);
 
 
@@ -91,8 +91,9 @@ void socketTask(void *pvParameters);
 void
 UARTIntHandler(void)
 {
-    uint32_t ui32Status;
+    taskDISABLE_INTERRUPTS();
 
+    uint32_t ui32Status;
     //
     // Get the interrrupt status.
     //
@@ -131,6 +132,8 @@ UARTIntHandler(void)
         //
         GPIOPinWrite(GPIO_PORTN_BASE, GPIO_PIN_0, 0);
     }
+    taskENABLE_INTERRUPTS();
+
 }
 
 
@@ -162,6 +165,7 @@ UARTSend(const uint8_t *pui8Buffer, uint32_t ui32Count)
 //*****************************************************************************
 void Timer0AIntHandler(void)
 {
+    taskDISABLE_INTERRUPTS();
     timer_isr_count++;
 //    UARTprintf("Timer Interrupt. ISR count:%d\n", timer_isr_count);
 
@@ -191,6 +195,8 @@ void Timer0AIntHandler(void)
         TimerIntEnable(TIMER0_BASE, TIMER_TIMA_TIMEOUT);
         IntEnable(INT_TIMER0A);
     }
+    taskENABLE_INTERRUPTS();
+
 }
 
 
@@ -210,12 +216,14 @@ void PortAIntHandler(void){
 //Analog Comparator0 ISR
 void COMP0_ISR(void)
 {
+    taskDISABLE_INTERRUPTS();
     comp_isr_count++;
 //    UARTprintf("Comparator ISR count:%d\n", comp_isr_count);
     ComparatorIntDisable(COMP_BASE, 0);
     ComparatorIntClear(COMP_BASE, 0);
     comp_out = ComparatorValueGet(COMP_BASE, 0);
     ComparatorIntEnable(COMP_BASE, 0);
+    taskENABLE_INTERRUPTS();
 }
 
 //UART setup
@@ -744,8 +752,12 @@ void pulseTask(void *pvParameters)
 #ifdef SERIAL
 void serialTask(void *pvParameters)
 {
+#ifdef PEDOMETER
     BaseType_t rec_ped_status;
+#endif
+#ifdef PULSE
     BaseType_t rec_pulse_status;
+#endif
 
     //instanting the message packet
     static message recv_msg;
