@@ -10,6 +10,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <string.h>
 #include <stdio.h>
 #include "utils/ustdlib.h"
 #include "main.h"
@@ -46,34 +47,38 @@
 #define TMP102_ADDR         (0x48)
 #define PEDOMETER           1
 #define PULSE               1
-#define SOCKET              1
+#define SERIAL              1
 #define ACCEL_RAW_VERBOSE   1
 
 #define SYSTICKHZ               100
 #define SYSTICKMS               (1000 / SYSTICKHZ)
 #define SYSTICK_INT_PRIORITY    0x80
 
-#undef PULSE
-#undef ACCEL_RAW_VERBOSE
-#undef PEDOMETER
 
-uint32_t pulse_rate[1];
-//uint32_t heart_rate;
+#undef ACCEL_RAW_VERBOSE
+#undef PULSE
+
 uint32_t output_clock_rate_hz;
 uint32_t GPIO_pin_a4;
 volatile int isr_counter;
 volatile uint32_t comp_out;
 volatile uint8_t timer_isr_count = 0;
 volatile uint8_t comp_isr_count = 0;
-volatile uint32_t number_of_heartbeats = 0;
+volatile uint32_t bpm = 0;
+volatile uint32_t bpm_cpy;
+volatile uint32_t bpm_flag = 0;
+
+
 uint32_t ui32NewIPAddress;
 
 QueueHandle_t pedQueue;
+QueueHandle_t pulseQueue;
+
 uint32_t g_ui32IPAddress;
 
 // Task declarations
 void pedometerTask(void *pvParameters);
-void heartbeatTask(void *pvParameters);
+void pulseTask(void *pvParameters);
 void socketTask(void *pvParameters);
 //void demoSerialTask(void *pvParameters);
 
@@ -178,7 +183,7 @@ DisplayIPAddress(uint32_t ui32Addr)
 void Timer0AIntHandler(void)
 {
     timer_isr_count++;
-    UARTprintf("Timer Interrupt. ISR count:%d\n", timer_isr_count);
+//    UARTprintf("Timer Interrupt. ISR count:%d\n", timer_isr_count);
 
     // Disable the Timer0A interrupt.
     IntDisable(INT_TIMER0A);
@@ -191,9 +196,10 @@ void Timer0AIntHandler(void)
 
     if(timer_isr_count == 2)
     {
-        UARTprintf("Beats per min:%d", number_of_heartbeats);
+//        UARTprintf("Beats per min:%d", bpm);
+        bpm_cpy = bpm;
         timer_isr_count = 0;
-        number_of_heartbeats = 0;
+        bpm = 0;
         comp_isr_count = 0;
         TimerIntEnable(TIMER0_BASE, TIMER_TIMA_TIMEOUT);
         IntEnable(INT_TIMER0A);
@@ -201,199 +207,11 @@ void Timer0AIntHandler(void)
     }
     else
     {
-        number_of_heartbeats += comp_isr_count;
+        bpm += comp_isr_count;
         TimerIntEnable(TIMER0_BASE, TIMER_TIMA_TIMEOUT);
         IntEnable(INT_TIMER0A);
     }
 }
-
-
-//*****************************************************************************
-//
-// Required by lwIP library to support any host-related timer functions.
-//
-//*****************************************************************************
-/*
-void
-lwIPHostTimerHandler(void)
-{
-    uint32_t ui32Idx, ui32NewIPAddress;
-
-    //
-    // Get the current IP address.
-    //
-    ui32NewIPAddress = lwIPLocalIPAddrGet();
-
-    //
-    // See if the IP address has changed.
-    //
-    if(ui32NewIPAddress != g_ui32IPAddress)
-    {
-        //
-        // See if there is an IP address assigned.
-        //
-        if(ui32NewIPAddress == 0xffffffff)
-        {
-            //
-            // Indicate that there is no link.
-            //
-            UARTprintf("Waiting for link.\n");
-        }
-        else if(ui32NewIPAddress == 0)
-        {
-            //
-            // There is no IP address, so indicate that the DHCP process is
-            // running.
-            //
-            UARTprintf("Waiting for IP address.\n");
-        }
-        else
-        {
-            //
-            // Display the new IP address.
-            //
-            UARTprintf("IP Address: ");
-            DisplayIPAddress(ui32NewIPAddress);
-            UARTprintf("\nOpen a browser and enter the IP address.\n");
-        }
-
-        //
-        // Save the new IP address.
-        //
-        g_ui32IPAddress = ui32NewIPAddress;
-
-        //
-        // Turn GPIO off.
-        //
-        MAP_GPIOPinWrite(GPIO_PORTN_BASE, GPIO_PIN_1, ~GPIO_PIN_1);
-    }
-
-    //
-    // If there is not an IP address.
-    //
-    if((ui32NewIPAddress == 0) || (ui32NewIPAddress == 0xffffffff))
-    {
-        //
-        // Loop through the LED animation.
-        //
-
-        for(ui32Idx = 1; ui32Idx < 17; ui32Idx++)
-        {
-
-            //
-            // Toggle the GPIO
-            //
-            MAP_GPIOPinWrite(GPIO_PORTN_BASE, GPIO_PIN_1,
-                    (MAP_GPIOPinRead(GPIO_PORTN_BASE, GPIO_PIN_1) ^
-                     GPIO_PIN_1));
-
-            SysCtlDelay(output_clock_rate_hz/(ui32Idx << 1));
-        }
-    }
-}
-*/
-//*****************************************************************************
-//
-// The interrupt handler for the SysTick interrupt.
-//
-//*****************************************************************************
-/*void
-SysTickIntHandler(void)
-{
-    //
-    // Call the lwIP timer handler.
-    //
-    lwIPTimer(SYSTICKMS);
-}
-
-*/
-//*****************************************************************************
-//
-// Sets up the additional lwIP raw API services provided by the application.
-//
-//*****************************************************************************
-/*void
-SetupServices(void *pvArg)
-{
-    uint8_t pui8MAC[6];
-
-    //
-    // Setup the device locator service.
-    //
-    LocatorInit();
-    lwIPLocalMACGet(pui8MAC);
-    LocatorMACAddrSet(pui8MAC);
-
-    LocatorAppTitleSet("DK-TM4C129X freertos_demo");
-
-    //
-    // Initialize a sample httpd server.
-    //
-    //httpd_init();
-    //UARTprintf("IP address: ");
-    //uint32_t ui32NewIPAddress = lwIPLocalIPAddrGet();
-    //DisplayIPAddress(ui32NewIPAddress);
-    //ui32NewIPAddress = lwIPLocalIPAddrGet();
-}
-*/
-
-//*****************************************************************************
-//
-// Initializes the lwIP tasks.
-//
-//*****************************************************************************
-/*uint32_t
-lwIPTaskInit(void)
-{
-    uint32_t ui32User0, ui32User1;
-    uint8_t pui8MAC[6];
-
-    //
-    // Get the MAC address from the user registers.
-    //
-    ROM_FlashUserGet(&ui32User0, &ui32User1);
-    if((ui32User0 == 0xffffffff) || (ui32User1 == 0xffffffff))
-    {
-        return(1);
-    }
-
-    //
-    // Convert the 24/24 split MAC address from NV ram into a 32/16 split MAC
-    // address needed to program the hardware registers, then program the MAC
-    // address into the Ethernet Controller registers.
-    //
-    pui8MAC[0] = ((ui32User0 >>  0) & 0xff);
-    pui8MAC[1] = ((ui32User0 >>  8) & 0xff);
-    pui8MAC[2] = ((ui32User0 >> 16) & 0xff);
-    pui8MAC[3] = ((ui32User1 >>  0) & 0xff);
-    pui8MAC[4] = ((ui32User1 >>  8) & 0xff);
-    pui8MAC[5] = ((ui32User1 >> 16) & 0xff);
-
-    //
-    // Lower the priority of the Ethernet interrupt handler.  This is required
-    // so that the interrupt handler can safely call the interrupt-safe
-    // FreeRTOS functions (specifically to send messages to the queue).
-    //
-    ROM_IntPrioritySet(INT_EMAC0, 0xC0);
-
-    //
-    // Initialize lwIP.
-    //
-    lwIPInit(output_clock_rate_hz, pui8MAC, 0, 0, 0, IPADDR_USE_DHCP);
-
-    //
-    // Setup the remaining services inside the TCP/IP thread's context.
-    //
-
-    tcpip_callback(SetupServices, 0);
-
-    //
-    // Success.
-    //
-
-    return 0;
-}
-*/
 
 
 void PortAIntHandler(void){
@@ -413,16 +231,37 @@ void PortAIntHandler(void){
 void COMP0_ISR(void)
 {
     comp_isr_count++;
-    UARTprintf("Comparator ISR count:%d\n", comp_isr_count);
+//    UARTprintf("Comparator ISR count:%d\n", comp_isr_count);
     ComparatorIntDisable(COMP_BASE, 0);
     ComparatorIntClear(COMP_BASE, 0);
     comp_out = ComparatorValueGet(COMP_BASE, 0);
     ComparatorIntEnable(COMP_BASE, 0);
 }
 
+//UART setup
 void UART_Init(void)
 {
+    ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_UART3);
+    ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOA);
+    //
+    // Set GPIO A4 and A5 as UART pins.
+    //
+    GPIOPinConfigure(GPIO_PA4_U3RX);
+    GPIOPinConfigure(GPIO_PA5_U3TX);
+    ROM_GPIOPinTypeUART(GPIO_PORTA_BASE, GPIO_PIN_4 | GPIO_PIN_5);
 
+    //
+    // Configure the UART for 57600, 8-N-1 operation.
+    //
+    ROM_UARTConfigSetExpClk(UART3_BASE, output_clock_rate_hz, 57600,
+                            (UART_CONFIG_WLEN_8 | UART_CONFIG_STOP_ONE |
+                             UART_CONFIG_PAR_NONE));
+
+    //
+    // Enable the UART interrupt.
+    //
+    ROM_IntEnable(INT_UART3);
+    ROM_UARTIntEnable(UART3_BASE, UART_INT_RX | UART_INT_RT);
 }
 
 void GPIO_Init(void)
@@ -622,105 +461,104 @@ void pedometerTask(void *pvParameters)
     BaseType_t status_pedQueue;
 
     //instanting the message packet
-    static message_t messg;
-    task_id_t id = pedometer;
+   static message ped_msg;
+
+   //writing 0x38 to CTRL9_XL(0x18)
+   //--------------------------------------------------------
+   ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, false);   //write to accelerometer
+   ROM_I2CMasterDataPut(I2C1_BASE, 0x18);
+   ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_START);
+   while(ROM_I2CMasterBusy(I2C1_BASE));
+
+   SysCtlDelay(100); //Delay by 1us
+
+   ROM_I2CMasterDataPut(I2C1_BASE, 0x38);
+   ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_FINISH);
+   while(ROM_I2CMasterBusy(I2C1_BASE));
+
+   UARTprintf("Finished writing to the CTRL9_XL register.\n");
+
+   //reading 0x38
+   ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, false);   //write to accelerometer
+   ROM_I2CMasterDataPut(I2C1_BASE, 0x18);
+   ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_START);
+   while(ROM_I2CMasterBusy(I2C1_BASE));
+
+   SysCtlDelay(100); //Delay by 1us
+
+   ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, true);    //read from status sensor
+   ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_SINGLE_RECEIVE);
+   while(ROM_I2CMasterBusy(I2C1_BASE));
+   ctrl9_xl = ROM_I2CMasterDataGet(I2C1_BASE);
+   //UARTprintf("CTRL9_XL is 0x%x\n", ctrl9_xl);
+
+
+   //writing 0x20 to CTRL1_XL(0x10) for pedometer functionality
+   //--------------------------------------------------------
+   ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, false);   //write to accelerometer
+   ROM_I2CMasterDataPut(I2C1_BASE, 0x10);
+   ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_START);
+   while(ROM_I2CMasterBusy(I2C1_BASE));
+
+   SysCtlDelay(100); //Delay by 1us
+
+   ROM_I2CMasterDataPut(I2C1_BASE, 0x20);
+   ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_FINISH);
+   while(ROM_I2CMasterBusy(I2C1_BASE));
+
+   UARTprintf("Finished writing to the CTRL1_XL register.\n");
+  //writing 0x3C to CTRL10_C(0x19)
+   //--------------------------------------------------------
+   ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, false);   //write to accelerometer
+   ROM_I2CMasterDataPut(I2C1_BASE, 0x19);
+   ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_START);
+   while(ROM_I2CMasterBusy(I2C1_BASE));
+
+   SysCtlDelay(100); //Delay by 1us
+
+   ROM_I2CMasterDataPut(I2C1_BASE, 0x3C);
+   ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_FINISH);
+   while(ROM_I2CMasterBusy(I2C1_BASE));
+
+   UARTprintf("Finished writing to the CTRL10_C register.\n");
+
+   //writing 0x40 to TAP_CFG(0x58) - Enabling pedometer algorithm
+   //--------------------------------------------------------
+   ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, false);   //write to accelerometer
+   ROM_I2CMasterDataPut(I2C1_BASE, 0x58);
+   ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_START);
+   while(ROM_I2CMasterBusy(I2C1_BASE));
+
+   SysCtlDelay(100); //Delay by 1us
+
+   ROM_I2CMasterDataPut(I2C1_BASE, 0x40);
+   ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_FINISH);
+   while(ROM_I2CMasterBusy(I2C1_BASE));
+
+   UARTprintf("Finished writing to the TAP_CFG register.\n");
+
+
+   //writing 0x80 to INT_CTRL1(0x0D)
+   //--------------------------------------------------------
+   ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, false);   //write to accelerometer
+   ROM_I2CMasterDataPut(I2C1_BASE, 0x0D);
+   ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_START);
+   while(ROM_I2CMasterBusy(I2C1_BASE));
+
+   SysCtlDelay(100); //Delay by 1us
+
+   ROM_I2CMasterDataPut(I2C1_BASE, 0x80);
+   ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_FINISH);
+   while(ROM_I2CMasterBusy(I2C1_BASE));
+
+   UARTprintf("Finished writing to the INT_CTRL1 register.\n");
+
    for (;;)
     {
 //        SysCtlDelay(10);
         // Turn on LED 1
         LEDWrite(0x0F, 0x01);
         vTaskDelay(1000);
-
-        //accelerometer
-        //writing 0x38 to CTRL9_XL(0x18)
-        //--------------------------------------------------------
-        ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, false);   //write to accelerometer
-        ROM_I2CMasterDataPut(I2C1_BASE, 0x18);
-        ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_START);
-        while(ROM_I2CMasterBusy(I2C1_BASE));
-
-        SysCtlDelay(100); //Delay by 1us
-
-        ROM_I2CMasterDataPut(I2C1_BASE, 0x38);
-        ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_FINISH);
-        while(ROM_I2CMasterBusy(I2C1_BASE));
-
-        UARTprintf("Finished writing to the CTRL9_XL register.\n");
-
-        //reading 0x38
-        ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, false);   //write to accelerometer
-        ROM_I2CMasterDataPut(I2C1_BASE, 0x18);
-        ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_START);
-        while(ROM_I2CMasterBusy(I2C1_BASE));
-
-        SysCtlDelay(100); //Delay by 1us
-
-        ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, true);    //read from status sensor
-        ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_SINGLE_RECEIVE);
-        while(ROM_I2CMasterBusy(I2C1_BASE));
-        ctrl9_xl = ROM_I2CMasterDataGet(I2C1_BASE);
-        //UARTprintf("CTRL9_XL is 0x%x\n", ctrl9_xl);
-
-
-        //writing 0x20 to CTRL1_XL(0x10) for pedometer functionality
-        //--------------------------------------------------------
-        ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, false);   //write to accelerometer
-        ROM_I2CMasterDataPut(I2C1_BASE, 0x10);
-        ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_START);
-        while(ROM_I2CMasterBusy(I2C1_BASE));
-
-        SysCtlDelay(100); //Delay by 1us
-
-        ROM_I2CMasterDataPut(I2C1_BASE, 0x20);
-        ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_FINISH);
-        while(ROM_I2CMasterBusy(I2C1_BASE));
-
-        UARTprintf("Finished writing to the CTRL1_XL register.\n");
-       //writing 0x3C to CTRL10_C(0x19)
-        //--------------------------------------------------------
-        ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, false);   //write to accelerometer
-        ROM_I2CMasterDataPut(I2C1_BASE, 0x19);
-        ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_START);
-        while(ROM_I2CMasterBusy(I2C1_BASE));
-
-        SysCtlDelay(100); //Delay by 1us
-
-        ROM_I2CMasterDataPut(I2C1_BASE, 0x3C);
-        ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_FINISH);
-        while(ROM_I2CMasterBusy(I2C1_BASE));
-
-        UARTprintf("Finished writing to the CTRL10_C register.\n");
-
-        //writing 0x40 to TAP_CFG(0x58) - Enabling pedometer algorithm
-        //--------------------------------------------------------
-        ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, false);   //write to accelerometer
-        ROM_I2CMasterDataPut(I2C1_BASE, 0x58);
-        ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_START);
-        while(ROM_I2CMasterBusy(I2C1_BASE));
-
-        SysCtlDelay(100); //Delay by 1us
-
-        ROM_I2CMasterDataPut(I2C1_BASE, 0x40);
-        ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_FINISH);
-        while(ROM_I2CMasterBusy(I2C1_BASE));
-
-        UARTprintf("Finished writing to the TAP_CFG register.\n");
-
-
-        //writing 0x80 to INT_CTRL1(0x0D)
-        //--------------------------------------------------------
-        ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, false);   //write to accelerometer
-        ROM_I2CMasterDataPut(I2C1_BASE, 0x0D);
-        ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_START);
-        while(ROM_I2CMasterBusy(I2C1_BASE));
-
-        SysCtlDelay(100); //Delay by 1us
-
-        ROM_I2CMasterDataPut(I2C1_BASE, 0x80);
-        ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_FINISH);
-        while(ROM_I2CMasterBusy(I2C1_BASE));
-
-        UARTprintf("Finished writing to the INT_CTRL1 register.\n");
 
         //-------------------------------------------------------
         //read the STATUS register(0x1E)
@@ -859,17 +697,22 @@ void pedometerTask(void *pvParameters)
             step_counter = (step_counter_h << 8) | step_counter_l;
             UARTprintf("step_counter is 0x%x\n", step_counter);
 
-            UARTprintf("ISR count is %d\n\n", isr_counter);
+            //UARTprintf("ISR count is %d\n\n", isr_counter);
 
-            data_pedQueue = isr_counter;
-            messg.data = data_pedQueue;
-            messg.task_id = id;
+            data_pedQueue = step_counter;
+            ped_msg.data = data_pedQueue;
+            ped_msg.source_task = pedometer;
+            ped_msg.log_level = LOG_INFO_DATA;
+            ped_msg.request_type = NOT_REQUEST;
+            ped_msg.msg_rqst_type = PED_DATA;
+            ped_msg.type = LOG_MESSAGE;
+            //TODO : Figure out timestamps
+
 
             //sending the data to the socket task using queue
-            status_pedQueue = xQueueSendToBack(pedQueue, &messg, 50);
-            //UARTprintf("Step count sent is %d\n", data_pedQueue);
+            status_pedQueue = xQueueSendToBack(pedQueue, &ped_msg, 50);
             if(status_pedQueue != pdPASS){
-                UARTprintf("Could not send data to queue.\n");
+                UARTprintf("Could not send data to pedometer queue.\n");
             }
 
             //reading gpio pin
@@ -882,94 +725,85 @@ void pedometerTask(void *pvParameters)
 
 #ifdef PULSE
 // Read heartbeat digital values
-void heartbeatTask(void *pvParameters)
+void pulseTask(void *pvParameters)
 {
+    //instanting the message packet
+    static message pulse_msg;
+    BaseType_t status_pulseQueue;
+
     // Enable Timer0A.
-    static uint32_t heart_rate = 0;
     TimerEnable(TIMER0_BASE, TIMER_A);
 
     while (1)
     {
-//        SysCtlDelay(10);
-//         Turn on LED 1
-//        LEDWrite(0x0F, 0x01);
-//        vTaskDelay(1000);
-
         // Turn on LED 2
         LEDWrite(0x0F, 0x02);
         vTaskDelay(1000);
-//
-//        // Turn on LED 3
-//        LEDWrite(0x0F, 0x04);
-//        vTaskDelay(1000);
-//
-//        // Turn on LED 4
-//        LEDWrite(0x0F, 0x08);
-//        vTaskDelay(1000);
 
-        /*
-        //Trigger ADC conversion
-        ADCProcessorTrigger(ADC0_BASE, 3);
+        UARTprintf("Current BPM is:%d\n", bpm_cpy);
 
-        //Wait for conversion to complete
-        while(!ADCIntStatus(ADC0_BASE, 3, false));
+        pulse_msg.data = bpm_cpy;
+        pulse_msg.source_task = pulse_rate;
+        pulse_msg.log_level = LOG_INFO_DATA;
+        pulse_msg.request_type = NOT_REQUEST;
+        pulse_msg.msg_rqst_type = PULSE_DATA;
+        pulse_msg.type = LOG_MESSAGE;
+        //TODO : Figure out timestamps
 
-        //Clear ADC interrupt flag
-        ADCIntClear(ADC0_BASE, 3);
 
-//        int32_t D0 = GPIOPinRead(GPIO_PORTB_BASE, GPIO_PIN_2);  //LO- Status
-        int32_t D0 = GPIOPinRead(GPIO_PORTF_BASE, GPIO_PIN_1);  //LO- Status
-        int32_t D1 = GPIOPinRead(GPIO_PORTB_BASE, GPIO_PIN_3);  //LO+ Status
-
-        //Display the LO- & LO+ digital value on UART
-        UARTprintf("LO- = 0x%x  LO+ = 0x%x\n", D0, D1);
-
-        if(D0 == 0x04 || D1 == 0x08)
-        {
-            UARTprintf("NOT CONNECTED!\n");
+        //sending the data to the socket task using queue
+        status_pulseQueue = xQueueSendToBack(pulseQueue, &pulse_msg, 50);
+        if(status_pulseQueue != pdPASS){
+            UARTprintf("Could not send data to pulse queue.\n");
         }
 
-        else
-        {
-            //Read ADC value
-            ADCSequenceDataGet(ADC0_BASE, 3, pulse_rate);
-            if(pulse_rate[0] >= 2000)
-            {
-                heart_rate++;
-            }
-
-            //Display the AIN0 (PE3) digital value on UART
-            UARTprintf("AIN0 = %d\n", pulse_rate[0]);
-        }
-
-        //Delay for some time
-        SysCtlDelay(1000);
-        */
-//        UARTprintf("ACMP0 value is:%d\n", ComparatorValueGet(COMP_BASE, 0));
-//        UARTprintf("ACMP0 trigger count is:%d\n", comp_isr_count);
     }
 }
 #endif
 
-#ifdef SOCKET
-void socketTask(void *pvParameters)
+#ifdef SERIAL
+void serialTask(void *pvParameters)
 {
     BaseType_t rec_ped_status;
+    BaseType_t rec_pulse_status;
 
     //instanting the message packet
-    static message_t recv_messg;
+    static message recv_msg;
 
     //UARTSend((uint8_t *)"\033[2JIn Socket task ", 19);
 
     for (;;)
     {
+        memset(&recv_msg, 0, sizeof(recv_msg));
+
         //receive data from queue with a block of 100 ticks
-        rec_ped_status = xQueueReceive(pedQueue, &recv_messg, 100);
+        rec_ped_status = xQueueReceive(pedQueue, &recv_msg, 100);
         if(rec_ped_status == pdPASS){
-            if(recv_messg.task_id == pedometer ){
-                UARTprintf("Source: pedometer task \nStep count received from queue: %d\n\n", recv_messg.data);
+            if(recv_msg.source_task == pedometer ){
+                if(recv_msg.log_level == LOG_INFO_DATA){
+                    UARTprintf("Source: pedometer task. Step count received from queue: %d\n\n", recv_msg.data);
+                }
+                else if(recv_msg.msg_rqst_type == PED_STARTUP){
+                    UARTprintf("Source: main task. Pedometer task is spawned\n");
+                }
             }
         }
+
+        memset(&recv_msg, 0, sizeof(recv_msg));
+
+#ifdef PULSE
+        rec_pulse_status = xQueueReceive(pulseQueue, &recv_msg, 100);
+        if(rec_pulse_status == pdPASS){
+            if(recv_msg.source_task == pulse_rate ){
+                if(recv_msg.log_level == LOG_INFO_DATA){
+                    UARTprintf("Source: pulse task \nStep count received from queue: %d\n\n", recv_msg.data);
+                }
+                else if(recv_msg.msg_rqst_type == PULSE_STARTUP){
+                    UARTprintf("Source: main task. Pulse task is spawned\n");
+                }
+            }
+        }
+#endif
     }
 }
 #endif
@@ -990,6 +824,14 @@ void __error__(char *pcFilename, uint32_t ui32Line)
 // Main function
 int main(void)
 {
+    static message main_msg;
+#ifdef PEDOMETER
+    BaseType_t status_pedQueue;
+#endif
+#ifdef PULSE
+    BaseType_t status_pulseQueue;
+#endif
+
     // Initialize system clock to 120 MHz
     output_clock_rate_hz = ROM_SysCtlClockFreqSet(
                                (SYSCTL_XTAL_25MHZ | SYSCTL_OSC_MAIN |
@@ -1003,15 +845,6 @@ int main(void)
     // Set up the UART which is connected to the virtual COM port
     UARTStdioConfig(0, 57600, SYSTEM_CLOCK);
     GPIO_Init();
-    UART_Init();
-
-    //
-    // Configure SysTick for a periodic interrupt.
-    //
-    /*MAP_SysTickPeriodSet(output_clock_rate_hz / SYSTICKHZ);
-    MAP_SysTickEnable();
-    MAP_SysTickIntEnable();
-    */
 
     //
     // Enable the GPIO port that is used for the on-board LED.
@@ -1026,9 +859,8 @@ int main(void)
     //
     // Enable the peripherals used by this example.
     //
-    ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_UART3);
-    ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOA);
 
+    UART_Init();
 
 
 #ifdef  PEDOMETER
@@ -1041,21 +873,54 @@ int main(void)
     Comparator_Init();    
 #endif
 
-    //creating the pedometer queue
-    pedQueue = xQueueCreate(10, sizeof(message_t));
 #ifdef PEDOMETER
+    //creating the pedometer queue
+    pedQueue = xQueueCreate(10, sizeof(message));
+
     // Create pedometer task
-     xTaskCreate(pedometerTask, (const portCHAR *)"pedometer",
+    xTaskCreate(pedometerTask, (const portCHAR *)"pedometer",
                   configMINIMAL_STACK_SIZE, NULL, 2, NULL);
+
+     main_msg.source_task = main_t;
+     main_msg.log_level = LOG_MODULE_STARTUP;
+     main_msg.msg_rqst_type = PED_STARTUP;
+     main_msg.request_type = NOT_REQUEST;
+     main_msg.type = SYSTEM_INIT_MESSAGE;
+     //TODO : Figure out timestamps
+
+     //sending the data to the socket task using queue
+     status_pedQueue = xQueueSendToBack(pedQueue, &main_msg, 50);
+     if(status_pedQueue != pdPASS){
+         UARTprintf("Could not send data to pedometer queue.\n");
+     }
+
 #endif
 #ifdef PULSE
+     //creating the pulse queue
+     pulseQueue = xQueueCreate(10, sizeof(message));
+
     // Create heartbeat task
-    xTaskCreate(heartbeatTask, (const portCHAR *)"heartbeat",
+    xTaskCreate(pulseTask, (const portCHAR *)"pulse",
                 configMINIMAL_STACK_SIZE, NULL, 2, NULL);
+
+    main_msg.source_task = main_t;
+    main_msg.log_level = LOG_MODULE_STARTUP;
+    main_msg.msg_rqst_type = PULSE_STARTUP;
+    main_msg.request_type = NOT_REQUEST;
+    main_msg.type = SYSTEM_INIT_MESSAGE;
+    //TODO : Figure out timestamps
+
+    //sending the data to the socket task using queue
+    status_pulseQueue = xQueueSendToBack(pulseQueue, &main_msg, 50);
+    if(status_pulseQueue != pdPASS){
+        UARTprintf("Could not send data to pulse queue.\n");
+    }
+
+
 #endif
 
-#ifdef SOCKET
-    xTaskCreate(socketTask, (const portCHAR *)"socket",
+#ifdef SERIAL
+    xTaskCreate(serialTask, (const portCHAR *)"serial",
                 configMINIMAL_STACK_SIZE, NULL, 1, NULL);
 #endif
     //
@@ -1063,19 +928,6 @@ int main(void)
     //
     ROM_IntMasterEnable();
 
-    //
-    // Set GPIO A0 and A1 as UART pins.
-    //
-    GPIOPinConfigure(GPIO_PA4_U3RX);
-    GPIOPinConfigure(GPIO_PA5_U3TX);
-    ROM_GPIOPinTypeUART(GPIO_PORTA_BASE, GPIO_PIN_4 | GPIO_PIN_5);
-
-    //
-    // Configure the UART for 57600, 8-N-1 operation.
-    //
-    ROM_UARTConfigSetExpClk(UART3_BASE, output_clock_rate_hz, 57600,
-                            (UART_CONFIG_WLEN_8 | UART_CONFIG_STOP_ONE |
-                             UART_CONFIG_PAR_NONE));
 
     /*while(1){
         int k = 0;
@@ -1100,13 +952,8 @@ int main(void)
             }
             GPIOPinWrite(GPIO_PORTN_BASE, GPIO_PIN_0, 0);
         }*/
-    //
-    // Enable the UART interrupt.
-    //
-    ROM_IntEnable(INT_UART3);
-    ROM_UARTIntEnable(UART3_BASE, UART_INT_RX | UART_INT_RT);
 
-    //UARTSend((uint8_t *)"Hi ", 3);
+
     //
     // Prompt for text to be entered.
     //
@@ -1115,20 +962,10 @@ int main(void)
     //}
 
 
-
-    //
-    // Create the lwIP tasks.
-    //
-    /*MAP_IntPrioritySet(FAULT_SYSTICK, SYSTICK_INT_PRIORITY);
-
-    if(lwIPTaskInit() != 0){
-        while(1){
-
-        }
-    }*/
-
     //Start scheduler
     vTaskStartScheduler();
+
+    UARTprintf("hihihihihihihih");
     return 0;
 }
 
