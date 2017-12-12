@@ -325,6 +325,7 @@ void *logger_thread_fn(void *threadid){
 
 //Start function of logger thread
 void *send_thread_fn(void *threadid){
+	int len;
 	static message msg_t;
 	char steps_status=0, heartbeat_status=0;
 	static char uart_send_buffer[100];
@@ -335,19 +336,31 @@ void *send_thread_fn(void *threadid){
 		}	
 		else{
 			if(msg_t.source_task == pedometer){
-				if(msg_t.data > 500){
+				if(msg_t.data > 35 && msg_t.data < 32000){
 					printf("That's a lot of steps for today!\n");
 					steps_status = 1;
-					LEDOn();	//LED1 ON
+					//Sending warning to Tiva board
+					memset(uart_send_buffer, 0, sizeof(uart_send_buffer));
+					// sprintf(uart_send_buffer, "Warning!Steps exceeded:%d\n", steps_status);
+					sprintf(uart_send_buffer, "S");
+					len  = strlen(uart_send_buffer) + 1;
+					write(fd, uart_send_buffer, len);
+					LEDOn();	//glow the error LED
 				}
 				else{
 					steps_status = 0;
 				}
 			}
 			else if(msg_t.source_task == pulse_rate){
-				if(msg_t.data > 90){
+				if(msg_t.data > 90 && msg_t.data < 32000){
 					printf("Very fast beating heart!\n");
 					heartbeat_status = 1;
+					//Sending warning to Tiva board
+					memset(uart_send_buffer, 0, sizeof(uart_send_buffer));
+					// sprintf(uart_send_buffer, "Warning!Pulse rate exceeded:%d\n", heartbeat_status);
+					sprintf(uart_send_buffer, "P");
+					len  = strlen(uart_send_buffer) + 1;
+					write(fd, uart_send_buffer, len);
 					LEDOn();	//glow the error LED
 				}
 				else{
@@ -360,8 +373,8 @@ void *send_thread_fn(void *threadid){
 			}
 
 			//TO-DO: UART send to Tiva
-			memset(uart_send_buffer, 0, sizeof(uart_send_buffer));
-			sprintf(uart_send_buffer, "Steps: %d, Heartbeat: %d", steps_status, heartbeat_status);
+			//memset(uart_send_buffer, 0, sizeof(uart_send_buffer));
+			//sprintf(uart_send_buffer, "S:%d,H:%d\n", steps_status, heartbeat_status);
 			//UART Send buffer
 		}
 
@@ -435,12 +448,12 @@ int main(int argc, char const *argv[]){
         printf("Failed to create logger thread.\n");
 	}
 	
-	/*
+	
 	//spawn send thread
 	if(pthread_create(&send_thread, &attr, (void*)&send_thread_fn, NULL)){
         printf("Failed to create send thread.\n");
 	}
-	*/
+	
  
 
 	while(1)
@@ -482,7 +495,7 @@ int main(int argc, char const *argv[]){
 	//join threads
  	pthread_join(data_recv_thread, NULL);
  	pthread_join(logger_thread, NULL);
- 	//pthread_join(send_thread, NULL);
+ 	pthread_join(send_thread, NULL);
 
 	return 0;
 }
