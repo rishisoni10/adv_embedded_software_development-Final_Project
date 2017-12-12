@@ -59,6 +59,8 @@
 #define CURRENT_MON     (12)
 #define CURRENT_DAY     (11)
 #define CURRENT_YEAR    (2017)
+#define STEP_BIT        1
+#define PULSE_BIT       2
 
 
 #undef ACCEL_RAW_VERBOSE
@@ -72,7 +74,7 @@ volatile uint8_t comp_isr_count = 0;
 volatile uint32_t bpm = 0;
 volatile uint32_t bpm_cpy;
 volatile uint32_t bpm_flag = 0;
-
+volatile uint8_t stat;
 
 uint32_t ui32NewIPAddress;
 
@@ -80,8 +82,11 @@ QueueHandle_t pedQueue;
 QueueHandle_t pulseQueue;
 QueueHandle_t sharedQueue1;
 QueueHandle_t sharedQueue2;
+static TaskHandle_t xTaskToNotify = NULL;
 
 uint32_t g_ui32IPAddress;
+
+TaskHandle_t notifyHandle;
 
 // Task declarations
 void pedometerTask(void *pvParameters);
@@ -160,7 +165,24 @@ UARTIntHandler(void)
         //
         // Read the next character from the UART and write it back to the UART.
         //
-        UARTprintf("%c", ROM_UARTCharGetNonBlocking(UART3_BASE));
+//        UARTprintf("%c", ROM_UARTCharGetNonBlocking(UART3_BASE));
+        stat = ROM_UARTCharGetNonBlocking(UART3_BASE);
+
+        if(stat == 'P')
+        {
+
+            xTaskNotifyFromISR(notifyHandle,
+                                   PULSE_BIT,
+                                   eSetBits,
+                                   NULL);
+        }
+        if(stat == 'S')
+        {
+            xTaskNotifyFromISR(notifyHandle,STEP_BIT,
+                                               eSetBits,
+                                               NULL);
+          }
+
         //ROM_UARTCharPutNonBlocking(UART3_BASE,
           //                         ROM_UARTCharGetNonBlocking(UART3_BASE));
 
@@ -369,8 +391,8 @@ void UART_Init(void)
     //
     // Enable the UART interrupt.
     //
-    //ROM_IntEnable(INT_UART3);
-    //ROM_UARTIntEnable(UART3_BASE, UART_INT_RX | UART_INT_RT);
+    ROM_IntEnable(INT_UART3);
+    ROM_UARTIntEnable(UART3_BASE, UART_INT_RX | UART_INT_RT);
 }
 
 void GPIO_Init(void)
@@ -1197,6 +1219,49 @@ void serialTask(void *pvParameters)
 }
 #endif
 
+
+void notifyTask(void *pvParameters)
+{
+    const TickType_t xMaxBlockTime = pdMS_TO_TICKS( 500 );
+    BaseType_t xResult;
+    uint32_t ulNotifiedValue;
+
+       for( ;; )
+       {
+          /* Wait to be notified of an interrupt. */
+          xResult = xTaskNotifyWait( pdFALSE,    /* Don't clear bits on entry. */
+                               0x03,        /* Clear all bits on exit. */
+                               &ulNotifiedValue, /* Stores the notified value. */
+                               xMaxBlockTime );
+
+          if( xResult == pdPASS )
+          {
+             /* A notification was received.  See which bits were set. */
+             if( ( ulNotifiedValue & STEP_BIT ) != 0 )
+             {
+                /* The TX ISR has set a bit. */
+                //prvProcessTx();
+                 UARTprintf("Steps exceeded!\n");
+                 LEDWrite(0x0F, 0x01);
+             }
+
+             if( ( ulNotifiedValue & PULSE_BIT ) != 0 )
+             {
+                /* The RX ISR has set a bit. */
+                //prvProcessRx();
+                 UARTprintf("Pulse exceeded!\n");
+                 LEDWrite(0x0F, 0x01);
+             }
+          }
+          else
+          {
+             /* Did not receive a notification within the expected time. */
+
+          }
+       }
+
+
+}
 /*  ASSERT() Error function
  *
  *  failed ASSERTS() from driverlib/debug.h are executed in this function
@@ -1313,6 +1378,10 @@ int main(void)
     xTaskCreate(serialTask, (const portCHAR *)"serial",
                 configMINIMAL_STACK_SIZE, NULL, 1, NULL);
 #endif
+
+    xTaskCreate(notifyTask, (const portCHAR *)"notify",
+                configMINIMAL_STACK_SIZE, NULL, 1, &notifyHandle);
+
     //
     // Enable processor interrupts.
     //
