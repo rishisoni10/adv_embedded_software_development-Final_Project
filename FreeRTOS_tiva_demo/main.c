@@ -672,8 +672,8 @@ void pedometerTask(void *pvParameters)
     {
 //        SysCtlDelay(10);
         // Turn on LED 1
-        LEDWrite(0x0F, 0x01);
-        vTaskDelay(1000);
+        //LEDWrite(0x0F, 0x01);
+        //vTaskDelay(1000);
 
         count++;
 
@@ -924,8 +924,8 @@ void pulseTask(void *pvParameters)
         count1++;
 
         // Turn on LED 2
-        LEDWrite(0x0F, 0x02);
-        vTaskDelay(1000);
+        //LEDWrite(0x0F, 0x02);
+        //vTaskDelay(1000);
 
         //UARTprintf("Current BPM is:%d\n", bpm_cpy);
 
@@ -1170,7 +1170,7 @@ void serialTask(void *pvParameters)
             }
             else if(recv_msg.source_task == main_t){
                 if(recv_msg.msg_rqst_type == PULSE_STARTUP){
-                      UARTprintf("Source: main task. Pedometer task is spawned\n");
+                      UARTprintf("Source: main task. Pulse task is spawned\n");
 
                       memset(buffer, 0, sizeof(buffer));
                       strcpy(buffer, "Log_level: ");
