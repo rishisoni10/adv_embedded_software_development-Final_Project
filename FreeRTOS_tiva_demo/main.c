@@ -90,6 +90,46 @@ void serialTask(void *pvParameters);
 //void demoSerialTask(void *pvParameters);
 
 
+/*
+Integer to ASCII (Null terminated string)
+*/
+char * my_itoa(char *str, int32_t data){
+
+    // If the number is '0'
+    if (data == 0){
+        *str++ = '0';
+        *str-- = '\0';   //Adding null for end of string and resetting str to initial value
+        return str;
+    }
+
+    int rem = 0;     //variable to store remainder
+    uint8_t length = 0;         //Calculating length of the string
+
+    //Dividing with the base to get the value of data in that base and storing it in the string
+    while (data != 0){
+        rem = data % 10;
+        *str++ = (rem > 9)? (rem-10) + 'A' : rem + '0';             //Ternary for base values greater than 10.
+        length++;
+        data = data/10;
+    }
+
+
+    *str = '\0'; // Append null character for end of string
+
+    // Reverse the string for final output as the loop gives us the last value first
+
+    uint8_t j=0;         //Initializing counter for the loop
+    int8_t temp;
+    str = str - length;        //Resetting str to initial value
+    for(j=0;j<length/2;j++){ //loop to reverse string
+        temp=*(str+j);
+        *(str+j) = *(str+length-j-1);
+        *(str+length-j-1)=temp;
+    }
+    return str;
+}
+
+
 //*****************************************************************************
 //
 // The UART interrupt handler.
@@ -802,14 +842,14 @@ void pedometerTask(void *pvParameters)
                 }
             }
 
-            memset(&send_pulse_msg, 0, sizeof(send_pulse_msg));
+            //memset(&send_pulse_msg, 0, sizeof(send_pulse_msg));
 
             status_recv_pulseQueue = xQueueReceive(sharedQueue2, &recv_pulse_msg, 50);
             if(status_recv_pulseQueue == pdPASS){
                 if(recv_pulse_msg.source_task == pulse_rate ){
                     if(recv_pulse_msg.type == REQUEST_MESSAGE){
                         //UARTprintf("Obtained request for pedometer data\n");
-                        memset(&recv_pulse_msg, 0, sizeof(recv_pulse_msg));
+                        //memset(&recv_pulse_msg, 0, sizeof(recv_pulse_msg));
                         recv_pulse_msg.data = data_pedQueue;
                         recv_pulse_msg.source_task = pedometer;
                         recv_pulse_msg.log_level = LOG_INFO_DATA;
@@ -831,7 +871,7 @@ void pedometerTask(void *pvParameters)
                         //UARTprintf("Obtained a response from PULSE task and bpm is %d.\n", recv_pulse_msg.data);
                     }
                 }
-                memset(&recv_pulse_msg, 0, sizeof(recv_pulse_msg));
+                //memset(&recv_pulse_msg, 0, sizeof(recv_pulse_msg));
             }
 
             data_pedQueue = step_counter;
@@ -850,7 +890,7 @@ void pedometerTask(void *pvParameters)
                 UARTprintf("Could not send data to pedometer queue.\n");
             }
 
-            memset(&ped_msg, 0, sizeof(ped_msg));
+            //memset(&ped_msg, 0, sizeof(ped_msg));
 
             //reading gpio pin
             GPIO_pin_a4 = GPIOPinRead(GPIO_PORTA_BASE, GPIO_PIN_4);
@@ -914,14 +954,14 @@ void pulseTask(void *pvParameters)
             }
         }
 
-        memset(&send_ped_msg, 0, sizeof(send_ped_msg));
+        //memset(&send_ped_msg, 0, sizeof(send_ped_msg));
 
         status_recv_pedQueue = xQueueReceive(sharedQueue1, &recv_ped_msg, 50);
         if(status_recv_pedQueue == pdPASS){
             if(recv_ped_msg.source_task == pedometer ){
                 if(recv_ped_msg.type == REQUEST_MESSAGE){
                     UARTprintf("Obtained request for pulse rate data\n");
-                    memset(&recv_ped_msg, 0, sizeof(recv_ped_msg));
+                    //memset(&recv_ped_msg, 0, sizeof(recv_ped_msg));
                     recv_ped_msg.data = bpm_cpy;
                     recv_ped_msg.source_task = pulse_rate;
                     recv_ped_msg.log_level = LOG_INFO_DATA;
@@ -943,7 +983,7 @@ void pulseTask(void *pvParameters)
                     //UARTprintf("Obtained a response from PEDOMETER task and step count is %d.\n", recv_ped_msg.data);
                 }
             }
-            memset(&recv_ped_msg, 0, sizeof(recv_ped_msg));
+            //memset(&recv_ped_msg, 0, sizeof(recv_ped_msg));
         }
 
         pulse_msg.data = bpm_cpy;
@@ -961,7 +1001,7 @@ void pulseTask(void *pvParameters)
             UARTprintf("Could not send data to pulse queue.\n");
         }
 
-        memset(&pulse_msg, 0, sizeof(pulse_msg));
+        //memset(&pulse_msg, 0, sizeof(pulse_msg));
 
     }
 }
@@ -971,8 +1011,9 @@ void pulseTask(void *pvParameters)
 void serialTask(void *pvParameters)
 {
     uint8_t msg_len;
-    char buffer[100];
-    struct tm curr_time;
+    char buffer[200];
+    char cat[10];
+    //struct tm curr_time;
 
 #ifdef PEDOMETER
     BaseType_t rec_ped_status;
@@ -984,75 +1025,171 @@ void serialTask(void *pvParameters)
     //instanting the message packet
     static message recv_msg;
 
-    //UARTSend((uint8_t *)"\033[2JIn Socket task ", 19);
-
     for (;;)
     {
 #ifdef PEDOMETER
-        memset(&recv_msg, 0, sizeof(recv_msg));
-        memset(buffer, 0, 100);
-        //receive data from queue with a block of 100 ticks
+        //receive data from queue with a block of 50 ticks
         rec_ped_status = xQueueReceive(pedQueue, &recv_msg, 50);
         if(rec_ped_status == pdPASS){
             if(recv_msg.source_task == pedometer ){
                 if(recv_msg.log_level == LOG_INFO_DATA && recv_msg.type == LOG_MESSAGE){
                     //UARTprintf("Source: pedometer task. Step count is %d\n", recv_msg.data);
-
                     memset(buffer, 0, sizeof(buffer));
-                    sprintf(buffer, "Log_level: %d|Request_type: %d|Source_task: %d\n", recv_msg.log_level, recv_msg.request_type, recv_msg.source_task);
-                    //UARTprintf("%s", buffer);
-                    UARTSend((uint8_t*)buffer, msg_len);
+                    strcpy(buffer, "Log_level: ");
+                    strcat(buffer, my_itoa(cat,  recv_msg.log_level));
+                    strcat(buffer, "|Request_type: ");
+                    strcat(buffer, my_itoa(cat,  recv_msg.request_type));
+                    strcat(buffer, "|Source_task: ");
+                    strcat(buffer, my_itoa(cat,  recv_msg.source_task));
+                    strcat(buffer, "|Message_type: ");
+                    strcat(buffer, my_itoa(cat,  recv_msg.type));
+                    strcat(buffer, "|Msg_rqst_type:  ");
+                    strcat(buffer, my_itoa(cat,  recv_msg.msg_rqst_type));
+                    strcat(buffer, "|Data: ");
+                    strcat(buffer, my_itoa(cat,  recv_msg.data));
+                    strcat(buffer, "\n");
 
-                    memset(buffer, 0, sizeof(buffer));
-                    sprintf(buffer, "Message_type: %d|Msg_rqst_type: %d|Data: %d\n", recv_msg.type, recv_msg.msg_rqst_type, recv_msg.data);
-                    //UARTprintf("%s", buffer);
-                    UARTSend((uint8_t*)buffer, msg_len);
-                }
-                else if(recv_msg.msg_rqst_type == PED_STARTUP){
-                    //UARTprintf("Source: main task. Pedometer task is spawned\n");
-
-                    memset(buffer, 0, sizeof(buffer));
-                    sprintf(buffer, "Log_level: %d|Request_type: %d|Source_task: %d\n", recv_msg.log_level, recv_msg.request_type, recv_msg.source_task);
-                    //UARTprintf("%s", buffer);
-                    UARTSend((uint8_t*)buffer, msg_len);
-
-                    memset(buffer, 0, sizeof(buffer));
-                    sprintf(buffer, "Message_type: %d|Msg_rqst_type: %d|Data: %d\n", recv_msg.type, recv_msg.msg_rqst_type, recv_msg.data);
-                    //UARTprintf("%s", buffer);
+                    msg_len = strlen(buffer);
                     UARTSend((uint8_t*)buffer, msg_len);
                 }
                 else if(recv_msg.type == REQUEST_MESSAGE){
                     UARTprintf("A request message from pulse rate task to pedometer task.\n");
 
                     memset(buffer, 0, sizeof(buffer));
-                    sprintf(buffer, "Log_level: %d|Request_type: %d|Source_task: %d\n", recv_msg.log_level, recv_msg.request_type, recv_msg.source_task);
-                    //UARTprintf("%s", buffer);
-                    UARTSend((uint8_t*)buffer, msg_len);
+                    strcpy(buffer, "Log_level: ");
+                    strcat(buffer, my_itoa(cat,  recv_msg.log_level));
+                    strcat(buffer, "|Request_type: ");
+                    strcat(buffer, my_itoa(cat,  recv_msg.request_type));
+                    strcat(buffer, "|Source_task: ");
+                    strcat(buffer, my_itoa(cat,  recv_msg.source_task));
+                    strcat(buffer, "|Message_type: ");
+                    strcat(buffer, my_itoa(cat,  recv_msg.type));
+                    strcat(buffer, "|Msg_rqst_type:  ");
+                    strcat(buffer, my_itoa(cat,  recv_msg.msg_rqst_type));
+                    strcat(buffer, "|Data: ");
+                    strcat(buffer, my_itoa(cat,  recv_msg.data));
+                    strcat(buffer, "\n");
 
-                    memset(buffer, 0, sizeof(buffer));
-                    sprintf(buffer, "Message_type: %d|Msg_rqst_type: %d|Data: %d\n", recv_msg.type, recv_msg.msg_rqst_type, recv_msg.data);
-                    //UARTprintf("%s", buffer);
+                    msg_len = strlen(buffer);
                     UARTSend((uint8_t*)buffer, msg_len);
                 }
+            }
+            else if(recv_msg.source_task == main_t ){
+                if(recv_msg.msg_rqst_type == PED_STARTUP){
+                      UARTprintf("Source: main task. Pedometer task is spawned\n");
+
+                      memset(buffer, 0, sizeof(buffer));
+                      strcpy(buffer, "Log_level: ");
+                      strcat(buffer, my_itoa(cat,  recv_msg.log_level));
+                      strcat(buffer, "|Request_type: ");
+                      strcat(buffer, my_itoa(cat,  recv_msg.request_type));
+                      strcat(buffer, "|Source_task: ");
+                      strcat(buffer, my_itoa(cat,  recv_msg.source_task));
+                      strcat(buffer, "|Message_type: ");
+                      strcat(buffer, my_itoa(cat,  recv_msg.type));
+                      strcat(buffer, "|Msg_rqst_type:  ");
+                      strcat(buffer, my_itoa(cat,  recv_msg.msg_rqst_type));
+                      strcat(buffer, "|Data: ");
+                      strcat(buffer, my_itoa(cat,  recv_msg.data));
+                      strcat(buffer, "\n");
+
+                      msg_len = strlen(buffer);
+                      UARTSend((uint8_t*)buffer, msg_len);
+                  }
             }
         }
 #endif
 
-        memset(&recv_msg, 0, sizeof(recv_msg));
+        //memset(&recv_msg, 0, sizeof(recv_msg));
 
 #ifdef PULSE
         rec_pulse_status = xQueueReceive(pulseQueue, &recv_msg, 50);
         if(rec_pulse_status == pdPASS){
             if(recv_msg.source_task == pulse_rate ){
-                if(recv_msg.log_level == LOG_INFO_DATA){
-                    //UARTprintf("Source: pulse task. BPM received from queue: %d\n\n", recv_msg.data);
+
+                if(recv_msg.msg_rqst_type == PULSE_STARTUP){
+                    UARTprintf("Source: main task. Pulse task is spawned\n");
+                    memset(buffer, 0, sizeof(buffer));
+                    strcpy(buffer, "Log_level: ");
+                    strcat(buffer, my_itoa(cat,  recv_msg.log_level));
+                    strcat(buffer, "|Request_type: ");
+                    strcat(buffer, my_itoa(cat,  recv_msg.request_type));
+                    strcat(buffer, "|Source_task: ");
+                    strcat(buffer, my_itoa(cat,  recv_msg.source_task));
+                    strcat(buffer, "|Message_type: ");
+                    strcat(buffer, my_itoa(cat,  recv_msg.type));
+                    strcat(buffer, "|Msg_rqst_type:  ");
+                    strcat(buffer, my_itoa(cat,  recv_msg.msg_rqst_type));
+                    strcat(buffer, "|Data: ");
+                    strcat(buffer, my_itoa(cat,  recv_msg.data));
+                    strcat(buffer, "\n");
+
+                    msg_len = strlen(buffer);
+                    UARTSend((uint8_t*)buffer, msg_len);
                 }
-                else if(recv_msg.msg_rqst_type == PULSE_STARTUP){
-                    //UARTprintf("Source: main task. Pulse task is spawned\n");
+                else if(recv_msg.log_level == LOG_INFO_DATA){
+                    //UARTprintf("Source: pulse task. BPM received from queue: %d\n\n", recv_msg.data);
+                    memset(buffer, 0, sizeof(buffer));
+                    strcpy(buffer, "Log_level: ");
+                    strcat(buffer, my_itoa(cat,  recv_msg.log_level));
+                    strcat(buffer, "|Request_type: ");
+                    strcat(buffer, my_itoa(cat,  recv_msg.request_type));
+                    strcat(buffer, "|Source_task: ");
+                    strcat(buffer, my_itoa(cat,  recv_msg.source_task));
+                    strcat(buffer, "|Message_type: ");
+                    strcat(buffer, my_itoa(cat,  recv_msg.type));
+                    strcat(buffer, "|Msg_rqst_type:  ");
+                    strcat(buffer, my_itoa(cat,  recv_msg.msg_rqst_type));
+                    strcat(buffer, "|Data: ");
+                    strcat(buffer, my_itoa(cat,  recv_msg.data));
+                    strcat(buffer, "\n");
+
+                    msg_len = strlen(buffer);
+                    UARTSend((uint8_t*)buffer, msg_len);
                 }
                 else if(recv_msg.type == REQUEST_MESSAGE){
-                    //UARTprintf("A request message from pedometer task to pulse rate task.\n");
+                    UARTprintf("A request message from pedometer task to pulse rate task.\n");
+                    memset(buffer, 0, sizeof(buffer));
+                    strcpy(buffer, "Log_level: ");
+                    strcat(buffer, my_itoa(cat,  recv_msg.log_level));
+                    strcat(buffer, "|Request_type: ");
+                    strcat(buffer, my_itoa(cat,  recv_msg.request_type));
+                    strcat(buffer, "|Source_task: ");
+                    strcat(buffer, my_itoa(cat,  recv_msg.source_task));
+                    strcat(buffer, "|Message_type: ");
+                    strcat(buffer, my_itoa(cat,  recv_msg.type));
+                    strcat(buffer, "|Msg_rqst_type:  ");
+                    strcat(buffer, my_itoa(cat,  recv_msg.msg_rqst_type));
+                    strcat(buffer, "|Data: ");
+                    strcat(buffer, my_itoa(cat,  recv_msg.data));
+                    strcat(buffer, "\n");
+
+                    msg_len = strlen(buffer);
+                    UARTSend((uint8_t*)buffer, msg_len);
                 }
+            }
+            else if(recv_msg.source_task == main_t){
+                if(recv_msg.msg_rqst_type == PULSE_STARTUP){
+                      UARTprintf("Source: main task. Pedometer task is spawned\n");
+
+                      memset(buffer, 0, sizeof(buffer));
+                      strcpy(buffer, "Log_level: ");
+                      strcat(buffer, my_itoa(cat,  recv_msg.log_level));
+                      strcat(buffer, "|Request_type: ");
+                      strcat(buffer, my_itoa(cat,  recv_msg.request_type));
+                      strcat(buffer, "|Source_task: ");
+                      strcat(buffer, my_itoa(cat,  recv_msg.source_task));
+                      strcat(buffer, "|Message_type: ");
+                      strcat(buffer, my_itoa(cat,  recv_msg.type));
+                      strcat(buffer, "|Msg_rqst_type:  ");
+                      strcat(buffer, my_itoa(cat,  recv_msg.msg_rqst_type));
+                      strcat(buffer, "|Data: ");
+                      strcat(buffer, my_itoa(cat,  recv_msg.data));
+                      strcat(buffer, "\n");
+
+                      msg_len = strlen(buffer);
+                      UARTSend((uint8_t*)buffer, msg_len);
+                  }
             }
         }
 #endif
@@ -1129,6 +1266,7 @@ int main(void)
     xTaskCreate(pedometerTask, (const portCHAR *)"pedometer",
                   configMINIMAL_STACK_SIZE, NULL, 2, NULL);
 
+
      main_msg.source_task = main_t;
      main_msg.log_level = LOG_MODULE_STARTUP;
      main_msg.msg_rqst_type = PED_STARTUP;
@@ -1143,6 +1281,7 @@ int main(void)
          UARTprintf("Could not send data to pedometer queue.\n");
      }
 
+
 #endif
 #ifdef PULSE
      //creating the pulse queue
@@ -1151,6 +1290,7 @@ int main(void)
     // Create heartbeat task
     xTaskCreate(pulseTask, (const portCHAR *)"pulse",
                 configMINIMAL_STACK_SIZE, NULL, 2, NULL);
+
 
     main_msg.source_task = main_t;
     main_msg.log_level = LOG_MODULE_STARTUP;
@@ -1181,7 +1321,6 @@ int main(void)
     //Start scheduler
     vTaskStartScheduler();
 
-    UARTprintf("hihihihihihihih");
     return 0;
 }
 
