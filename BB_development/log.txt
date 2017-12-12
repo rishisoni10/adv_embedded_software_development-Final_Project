@@ -1,0 +1,24 @@
+[1513061513 secs] [LOG_MODULE_STARTUP] Pedometer task spawned on Tiva
+[1513061513 secs] [LOG_MODULE_STARTUP] Pulse rate task spawned on Tiva
+[1513061513 secs] [LOG_REQUEST] Pedometer task received data REQUEST from Pulse rate task.
+[1513061513 secs] [LOG_INFO_DATA] Source: Pulse rate thread; Data: 0 bpm
+[1513061513 secs] [LOG_INFO_DATA] Source: Pedometer thread; Data: 0 steps
+[1513061513 secs] [LOG_INFO_DATA] Source: Pedometer thread; Data: 0 steps
+[1513061513 secs] [LOG_INFO_DATA] Source: Pedometer thread; Data: 0 steps
+[1513061514 secs] [LOG_INFO_DATA] Source: Pulse rate thread; Data: 0 bpm
+[1513061514 secs] [LOG_INFO_DATA] Source: Pedometer thread; Data: 0 steps
+[1513061514 secs] [LOG_INFO_DATA] Source: Pedometer thread; Data: 0 steps
+[1513061514 secs] [LOG_INFO_DATA] Source: Pedometer thread; Data: 0 steps
+[1513061514 secs] [LOG_REQUEST] Pulse rate task received data REQUEST from Pedometer task.
+[1513061514 secs] [LOG_INFO_DATA] Source: Pulse rate thread; Data: 0 bpm
+[1513061514 secs] [LOG_INFO_DATA] Source: Pedometer thread; Data: 0 steps
+[1513061514 secs] [LOG_INFO_DATA] Source: Pulse rate thread; Data: 0 bpm
+[1513061515 secs] [LOG_INFO_DATA] Source: Pedometer thread; Data: 0 steps
+[1513061515 secs] [LOG_INFO_DATA] Source: Pedometer thread; Data: 0 steps
+[1513061515 secs] [LOG_INFO_DATA] Source: Pulse rate thread; Data: 0 bpm
+[1513061515 secs] [LOG_INFO_DATA] Source: Pedometer thread; Data: 0 steps
+[1513061515 secs] [LOG_INFO_DATA] Source: Pedometer thread; Data: 0 steps
+[1513061515 secs] [LOG_INFO_DATA] Source: Pulse rate thread; Data: 0 bpm
+[1513061515 secs] [LOG_INFO_DATA] Source: Pedometer thread; Data: 0 steps
+[1513061516 secs] [LOG_INFO_DATA] Source: Pedometer thread; Data: 0 steps
+[1513061516 secs] [LOG_INFO_DATA] Source: Pedometer thread; Data: 0 steps
