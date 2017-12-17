@@ -38,7 +38,8 @@ typedef enum{
     pedometer,
     pulse_rate,
     serial,
-    main_t
+    main_t,
+    test_t
 }task_id;
 
 /*Enumerating whether the request message queue has a request
@@ -55,7 +56,8 @@ typedef enum type_rqst{
     PED_STARTUP,
     PED_DATA,
     PULSE_STARTUP,
-    PULSE_DATA
+    PULSE_DATA,
+    FEATURE_ADDED
 }type_of_request;
 
 
