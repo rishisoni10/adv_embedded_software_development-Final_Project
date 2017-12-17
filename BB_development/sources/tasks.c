@@ -35,6 +35,11 @@
 #include "led.h"
 
 #define LOG_BUFFER_SIZE 10000
+#define FEATURES	1
+#define UNIT		1
+
+#undef UNIT
+
 
 extern int fd;
 extern void uart_init(void);
@@ -42,6 +47,7 @@ extern void uart_init(void);
 uint32_t read_config = 1;
 int retval;
 
+//3 pthreads
 pthread_t data_recv_thread;
 pthread_t logger_thread;
 pthread_t send_thread;
@@ -60,11 +66,14 @@ static volatile int loop_count = 0;
 char *filename_cmd;
 
 struct mq_attr mq_attr_log;
+
+//message queue descriptors
 static mqd_t mqd_data_recv, mqd_data_recv_copy;
 
 const char* log_levels[] = {"LOG_CRITICAL_FAILURE", "LOG_SENSOR_EXTREME_DATA", \
  "LOG_MODULE_STARTUP", "LOG_INFO_DATA", "LOG_REQUEST", "LOG_HEARTBEAT", "LOG_LIGHT_TRANSITION"};
 
+//signal handler if ctrl+c pressed
 void signal_handler(int signum)
 {
 	if (signum == SIGINT)
@@ -80,6 +89,10 @@ void signal_handler(int signum)
 
 
 //Start function of data receive thread
+/*Description: The data receive thread receives data from the UART interface,
+ * constructs a message structure from the incoming string data and sends these messages to the data reeive queue
+ *
+ */
 void *data_recv_thread_fn(void *threadid){
 	printf("In data receive function.\n");
 	int str_len;
@@ -122,6 +135,8 @@ void *data_recv_thread_fn(void *threadid){
         {
         	// c = poll_for_data();    
         	// append(buffer, c);
+		//
+		// reading in data from the UART and parsing it for specific fields
         	read(fd, &c, 1);
         	str_len = strlen(buffer);
 	        buffer[str_len] = c;
@@ -133,18 +148,23 @@ void *data_recv_thread_fn(void *threadid){
                 // msg_temp = parse(parse_buffer);
 
                 /*Parsing block starts here....*/
-                buff1 = malloc(strlen(buffer)+1);
+			//buff1 is the request-type	
+                	buff1 = malloc(strlen(buffer)+1);
 		        strcpy(buff1, buffer);
 
+			//buff2 is source_task
 		        buff2 = malloc(strlen(buffer)+1);
 		        strcpy(buff2, buffer);
 
+			//buff3 is message_type
 		        buff3 = malloc(strlen(buffer)+1);
 		        strcpy(buff3, buffer);
 
+			//buff4 is msg_rqst_type
 		        buff4 = malloc(strlen(buffer)+1);
 		        strcpy(buff4, buffer);
 
+			//buff5 is data
 		        buff5 = malloc(strlen(buffer)+1);
 		        strcpy(buff5, buffer);
 
@@ -208,9 +228,7 @@ void *data_recv_thread_fn(void *threadid){
 		gettimeofday(&msg_temp.t, NULL);
 
 
-		//printf("timestamp in secs is %ld\n", msg1.t.tv_sec);
-		//printf("timestamp in usecs is %ld\n", msg1.t.tv_usec);
-
+		//sending the message to the message data queue
 		if(mq_send(mqd_data_recv, (const char *)&msg_temp, sizeof(msg_temp), 1)){
 			printf("Data receive thread could not send data to logger.\n");
 		}
@@ -227,6 +245,7 @@ void *data_recv_thread_fn(void *threadid){
 		msg_temp_cp.msg_rqst_type = uart_type_of_rqst;
 		gettimeofday(&msg_temp_cp.t, NULL);
 
+		//sending a copy to the copy message data queue
 		if(mq_send(mqd_data_recv_copy, (const char *)&msg_temp_cp, sizeof(msg_temp_cp), 1)){
 			printf("Data receive thread could not send data copy to send thread.\n");
 		}
@@ -236,7 +255,10 @@ void *data_recv_thread_fn(void *threadid){
 }
 
 
-//Start function of logger thread
+//Start function of logger thread 
+/* Description: Reads in messages from the data receive queue
+ * Constructing messages to be written to LOG file
+ */
 void *logger_thread_fn(void *threadid){
 	printf("In logger thread function.\n");
 	static message msg_t;
@@ -256,9 +278,12 @@ void *logger_thread_fn(void *threadid){
 			printf("Logger thread could not receive data from data receive thread.\n");
 		}	
 		else{
+			//check if it is a log message type
 			if(msg_t.type == (LOG_MESSAGE)){
+				//check if source is pedometer
 				if(msg_t.source_task == pedometer){
 					ped_count_log++;
+					//constructing the text to be sent to LOG file
 					sprintf(buf, "[%ld secs] [%s] Source: Pedometer thread; Data: %d steps\n", \
 					msg_t.t.tv_sec, log_levels[msg_t.log_level], msg_t.data);
 					if(ped_count_log%100 == 1){ 
@@ -266,8 +291,10 @@ void *logger_thread_fn(void *threadid){
 					}
 					memset(buf, 0, LOG_BUFFER_SIZE);
 				}
+				//check if source is pulse rate
 				else if(msg_t.source_task == pulse_rate){
 					pulse_count_log++;
+					//constructing the text to be sent to LOG file
 					sprintf(buf, "[%ld secs] [%s] Source: Pulse rate thread; Data: %d bpm\n", \
 					msg_t.t.tv_sec, log_levels[msg_t.log_level], msg_t.data);
 					if(pulse_count_log%100 == 1){
@@ -276,9 +303,11 @@ void *logger_thread_fn(void *threadid){
 					memset(buf, 0, LOG_BUFFER_SIZE);
 				}
 			}
+			//check if it is a spawning message  - SYSTEM_INIT_MESSAGE
 			else if(msg_t.type == (SYSTEM_INIT_MESSAGE)){
 				if(msg_t.msg_rqst_type == PED_STARTUP){
 					ped_count_init++;
+					//constructing the text to be sent to LOG file
 					sprintf(buf, "[%ld secs] [%s] Pedometer task spawned on Tiva\n", \
 					msg_t.t.tv_sec, log_levels[msg_t.log_level]);
 					if(ped_count_init%100 == 1){
@@ -288,6 +317,7 @@ void *logger_thread_fn(void *threadid){
 				}
 				else if(msg_t.msg_rqst_type == PULSE_STARTUP){
 					pulse_count_init++;
+					//constructing the text to be sent to LOG file
 					sprintf(buf, "[%ld secs] [%s] Pulse rate task spawned on Tiva\n", \
 					msg_t.t.tv_sec, log_levels[msg_t.log_level]);
 					if(pulse_count_init%100 == 1){
@@ -296,6 +326,7 @@ void *logger_thread_fn(void *threadid){
 					memset(buf, 0, LOG_BUFFER_SIZE);
 				}
 			}
+			//for the REQUEST case : 1 task requesting the other task directly for data
 			else if(msg_t.type == (REQUEST_MESSAGE)){
 				if(msg_t.source_task == pedometer){
 					ped_count_rqst++;
@@ -323,7 +354,11 @@ void *logger_thread_fn(void *threadid){
 }
 
 
-//Start function of logger thread
+//Start function of sending thread
+/*Description: The sending thread reads in data from the copy message data queue.
+ * Based on the data, it decides whether the step count and pulse rate is greater than thresholds
+ * If it is greater, then we send a message over the UART to Tiva and glow the error LED
+ */
 void *send_thread_fn(void *threadid){
 	int len;
 	static message msg_t;
@@ -331,11 +366,14 @@ void *send_thread_fn(void *threadid){
 	static char uart_send_buffer[100];
 
 	while(1){
+		//receving message from data receive queue
 		if(mq_receive(mqd_data_recv_copy, (char *)&msg_t, sizeof(msg_t), NULL) < 0){
 			
 		}	
 		else{
+			//for pedometer thread
 			if(msg_t.source_task == pedometer){
+				//setting threshold for step counter to 35
 				if(msg_t.data > 35 && msg_t.data < 32000){
 					printf("That's a lot of steps for today!\n");
 					steps_status = 1;
@@ -351,8 +389,10 @@ void *send_thread_fn(void *threadid){
 					steps_status = 0;
 				}
 			}
+			//for pulse rate thread
 			else if(msg_t.source_task == pulse_rate){
-				if(msg_t.data > 90 && msg_t.data < 32000){
+				//setting the bpm threshold to 200
+				if(msg_t.data > 200 && msg_t.data < 32000){
 					printf("Very fast beating heart!\n");
 					heartbeat_status = 1;
 					//Sending warning to Tiva board
@@ -360,6 +400,7 @@ void *send_thread_fn(void *threadid){
 					// sprintf(uart_send_buffer, "Warning!Pulse rate exceeded:%d\n", heartbeat_status);
 					sprintf(uart_send_buffer, "P");
 					len  = strlen(uart_send_buffer) + 1;
+					//sending over the UART interface
 					write(fd, uart_send_buffer, len);
 					LEDOn();	//glow the error LED
 				}
@@ -368,14 +409,11 @@ void *send_thread_fn(void *threadid){
 				}
 			}
 
+			//if both conditions are 0, then LED off
 			if(!steps_status && !heartbeat_status){
 				LEDOff();	//No error
 			}
 
-			//TO-DO: UART send to Tiva
-			//memset(uart_send_buffer, 0, sizeof(uart_send_buffer));
-			//sprintf(uart_send_buffer, "S:%d,H:%d\n", steps_status, heartbeat_status);
-			//UART Send buffer
 		}
 
 		usleep(900);
@@ -383,6 +421,7 @@ void *send_thread_fn(void *threadid){
 }
 
 
+//main task
 int main(int argc, char const *argv[]){
 
 	pthread_attr_t attr;
@@ -400,40 +439,28 @@ int main(int argc, char const *argv[]){
 		filename_cmd = argv[1];
 	}
 
-   if(pthread_mutex_init(&mutex_data_recv, NULL)){
-      printf("Error in initializing data receive mutex.\n");  
-      exit(1);
-   }
-
-   if(pthread_mutex_init(&mutex_log, NULL)){
-      printf("Error in initializing log mutex.\n");  
-      exit(1);
-   }
-
-   if(pthread_mutex_init(&mutex_send, NULL)){
-      printf("Error in initializing send mutex.\n");  
-      exit(1);
-   }
-
 	//initializing message queue attributes
-	mq_attr_log.mq_maxmsg = 10;
-	mq_attr_log.mq_msgsize = sizeof(message);
-	mq_attr_log.mq_flags = 0;
+	mq_attr_log.mq_maxmsg = 10;       //10 max messages
+	mq_attr_log.mq_msgsize = sizeof(message);   //size of message
+	mq_attr_log.mq_flags = 0;      //flags
 
+	//unlinking the 2 queues before opening them
 	mq_unlink(DATA_RECV_MSG_QUEUE);
 	mq_unlink(DATA_RECV_MSG_QUEUE_COPY);
 
+	//opening data receive message queue
 	mqd_data_recv = mq_open(DATA_RECV_MSG_QUEUE, \
 						O_CREAT|O_RDWR|O_NONBLOCK, \
 						0666, \
 						&mq_attr_log);
 
+	//opening a copy of receive message queue
 	mqd_data_recv_copy = mq_open(DATA_RECV_MSG_QUEUE_COPY, \
 						O_CREAT|O_RDWR|O_NONBLOCK, \
 						0666, \
 						&mq_attr_log);
 
-
+	//registering signal handler
   	signal(SIGINT, signal_handler);
 	
 	pthread_attr_init(&attr);
@@ -453,41 +480,9 @@ int main(int argc, char const *argv[]){
 	if(pthread_create(&send_thread, &attr, (void*)&send_thread_fn, NULL)){
         printf("Failed to create send thread.\n");
 	}
-	
- 
 
 	while(1)
 	{
-
-			/*
-			//checking the temp queue
-			if(mq_receive(mqd_temp_cp, (char *)&msg_te, sizeof(msg_te), NULL) < 0)
-			{
-				// printf("Main thread could not receive data from temp thread.\n");
-			}	
-			else
-			{
-				if(*(float *)msg_te.data > TEMP_UPPER - 10 && *(float *)msg_te.data < TEMP_UPPER + 10)
-				{
-					printf("TOO HOT!!!\n");
-					LEDBlink();	//LED1 Blinking
-					msg_te.log_level = LOG_SENSOR_EXTREME_DATA;
-					if(mq_send(mqd_temp, (const char *)&msg_te, sizeof(msg_te), 1) < 0)
-						printf("Main thread could not send temp extreme data to logger.\n");
-				}
-				if(*(float *)msg_te.data > TEMP_LOWER - 10 && *(float *)msg_te.data < TEMP_LOWER + 10)
-				{
-					printf("TOO COLD!!!\n");
-					LEDBlink();	//LED1 Blinking					
-					msg_te.log_level = LOG_SENSOR_EXTREME_DATA;
-					if(mq_send(mqd_temp, (const char *)&msg_te, sizeof(msg_te), 1) < 0)
-						printf("Main thread could not send temp extreme data to logger.\n");
-					// signal_handler(SIGINT);
-				}
-				
-			}*/
-
-			
 
 		usleep(1000);
 	}
