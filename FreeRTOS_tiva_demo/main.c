@@ -49,6 +49,16 @@
 #define PULSE               1
 #define SERIAL              1
 #define ACCEL_RAW_VERBOSE   1
+//#define UNIT                1
+#define INIT                1
+
+//#undef PEDOMETER
+//#undef PULSE
+//#undef SERIAL
+
+volatile int total_tests;
+volatile int pass_tests;
+volatile int fail_tests;
 
 #define SYSTICKHZ               100
 #define SYSTICKMS               (1000 / SYSTICKHZ)
@@ -86,13 +96,15 @@ static TaskHandle_t xTaskToNotify = NULL;
 
 uint32_t g_ui32IPAddress;
 
+volatile int uart_flag;
+volatile int i2c_flag;
+
 TaskHandle_t notifyHandle;
 
 // Task declarations
 void pedometerTask(void *pvParameters);
 void pulseTask(void *pvParameters);
 void serialTask(void *pvParameters);
-//void demoSerialTask(void *pvParameters);
 
 
 /*
@@ -140,6 +152,7 @@ char * my_itoa(char *str, int32_t data){
 // The UART interrupt handler.
 //
 //*****************************************************************************
+#ifdef SERIAL
 void
 UARTIntHandler(void)
 {
@@ -204,8 +217,51 @@ UARTIntHandler(void)
     taskENABLE_INTERRUPTS();
 
 }
+#endif
 
 
+#ifdef UNIT
+void
+UARTIntHandler(void)
+{
+    taskDISABLE_INTERRUPTS();
+
+    uint32_t ui32Status;
+    //
+    // Get the interrrupt status.
+    //
+    ui32Status = ROM_UARTIntStatus(UART3_BASE, true);
+
+    //
+    // Clear the asserted interrupts.
+    //
+    ROM_UARTIntClear(UART3_BASE, ui32Status);
+
+    //
+    // Loop while there are characters in the receive FIFO.
+    //
+    while(ROM_UARTCharsAvail(UART3_BASE))
+    {
+        //
+        // Read the next character from the UART and write it back to the UART.
+        //
+        //UARTprintf("Msg recv is %c", ROM_UARTCharGetNonBlocking(UART3_BASE));
+        stat = ROM_UARTCharGetNonBlocking(UART3_BASE);
+        if(stat == '4'){
+            total_tests ++;
+            pass_tests ++;
+            uart_flag = 1;
+        }
+        else{
+            total_tests ++;
+            fail_tests ++;
+        }
+
+    }
+    taskENABLE_INTERRUPTS();
+
+}
+#endif
 //*****************************************************************************
 //
 // Send a string to the UART.
@@ -230,7 +286,7 @@ UARTSend(const uint8_t *pui8Buffer, uint32_t ui32Count)
 //*****************************************************************************
 //
 // The interrupt handler for the Timer0A interrupt.
-//
+// 30 second timer.
 //*****************************************************************************
 void Timer0AIntHandler(void)
 {
@@ -1029,6 +1085,135 @@ void pulseTask(void *pvParameters)
 }
 #endif
 
+void testTask(void *pvParameters){
+    //instanting the message packet
+    static message test_msg;
+    BaseType_t status_testQueue;
+    static int i = 0;
+    for(;;){
+        test_msg.source_task = test_t;
+        test_msg.log_level = LOG_MODULE_STARTUP;
+        test_msg.msg_rqst_type = FEATURE_ADDED;
+        test_msg.request_type = NOT_REQUEST;
+        test_msg.type = SYSTEM_INIT_MESSAGE;
+        test_msg.data = 9999;
+
+        i++;
+
+        //sending the data to the socket task using queue
+        if(i % 15 == 0){
+            status_testQueue = xQueueSendToBack(pedQueue, &test_msg, 100);
+            if(status_testQueue != pdPASS){
+                //UARTprintf("Could not send feature data to pedometer queue.\n");
+            }
+        }
+    }
+}
+
+
+void unit(void){
+    int status = 0;
+
+    //TEST1: UART loopback test
+    UARTSend((uint8_t *)"4", 1);
+
+    //TEST2: I2C sensor test
+    // On GPIO PortL
+    ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOG);
+
+    //
+    // Wait for the Peripheral to be ready for programming
+    //
+    while(!ROM_SysCtlPeripheralReady(SYSCTL_PERIPH_GPIOG));
+
+    //
+    // Configure the pin muxing for I2C2 functions on port L0 and L1.
+    // This step is not necessary if your part does not support pin muxing.
+    //
+    ROM_GPIOPinConfigure(GPIO_PG0_I2C1SCL);
+    ROM_GPIOPinConfigure(GPIO_PG1_I2C1SDA);
+    //
+    // Select the I2C function for these pins.  This function will also
+    // configure the GPIO pins pins for I2C operation, setting them to
+    // open-drain operation with weak pull-ups.  Consult the data sheet
+    // to see which functions are allocated per pin.
+    //
+    ROM_GPIOPinTypeI2C(GPIO_PORTG_BASE, GPIO_PIN_1);
+    GPIOPinTypeI2CSCL(GPIO_PORTG_BASE, GPIO_PIN_0);
+
+    //
+    // Stop the Clock, Reset and Enable I2C Module
+    // in Master Function
+    //
+    ROM_SysCtlPeripheralDisable(SYSCTL_PERIPH_I2C1);
+    ROM_SysCtlPeripheralReset(SYSCTL_PERIPH_I2C1);
+    ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_I2C1);
+
+    //
+    // Wait for the Peripheral to be ready for programming
+    //
+    while(!ROM_SysCtlPeripheralReady(SYSCTL_PERIPH_I2C1));
+
+    //
+    // Initialize and Configure the Master Module
+    //
+    ROM_I2CMasterInitExpClk(I2C1_BASE, SYSTEM_CLOCK, true);     //400kbps
+
+
+    //writing 0x38 to CTRL9_XL(0x18)
+    //--------------------------------------------------------
+    ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, false);   //write to accelerometer
+    ROM_I2CMasterDataPut(I2C1_BASE, 0x18);
+    ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_START);
+    while(ROM_I2CMasterBusy(I2C1_BASE));
+
+    SysCtlDelay(100); //Delay by 1us
+
+    ROM_I2CMasterDataPut(I2C1_BASE, 0x38);
+    ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_FINISH);
+    while(ROM_I2CMasterBusy(I2C1_BASE));
+
+    //UARTprintf("Finished writing to the CTRL9_XL register.\n");
+
+
+    //read the CTRL9_XL register(0x18)
+    ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, false);   //write to accelerometer
+    ROM_I2CMasterDataPut(I2C1_BASE, 0x18);
+    ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_BURST_SEND_START);
+    while(ROM_I2CMasterBusy(I2C1_BASE));
+
+    SysCtlDelay(100); //Delay by 1us
+
+    ROM_I2CMasterSlaveAddrSet(I2C1_BASE, LSM6DS3_ADDR, true);    //read from status sensor
+    ROM_I2CMasterControl(I2C1_BASE, I2C_MASTER_CMD_SINGLE_RECEIVE);
+    while(ROM_I2CMasterBusy(I2C1_BASE));
+    status = ROM_I2CMasterDataGet(I2C1_BASE);
+
+    if(status == 0x38){
+        total_tests++;
+        pass_tests++;
+        UARTprintf("I2C interface read test: PASS\n");
+    }
+    else{
+        total_tests++;
+        fail_tests++;
+        UARTprintf("I2C interface read test: FAIL\n");
+    }
+
+    if(uart_flag){
+        UARTprintf("UART loopback test: PASS\n");
+    }
+    else
+        UARTprintf("UART loopback test: FAIL\n");
+
+    //final unit test status
+    UARTprintf("Unit Test Status -\n");
+    UARTprintf("-------------------------\n");
+    UARTprintf("Pass tests: %d\n", pass_tests);
+    UARTprintf("Fail tests: %d\n", fail_tests);
+}
+
+
 #ifdef SERIAL
 void serialTask(void *pvParameters)
 {
@@ -1118,6 +1303,28 @@ void serialTask(void *pvParameters)
                       msg_len = strlen(buffer);
                       UARTSend((uint8_t*)buffer, msg_len);
                   }
+            }
+            else if(recv_msg.source_task == test_t ){
+                      UARTprintf("Source: main task. Feature task sent a msg.\n");
+
+                      memset(buffer, 0, sizeof(buffer));
+                      strcpy(buffer, "Log_level: ");
+                      strcat(buffer, my_itoa(cat,  recv_msg.log_level));
+                      strcat(buffer, "|Request_type: ");
+                      strcat(buffer, my_itoa(cat,  recv_msg.request_type));
+                      strcat(buffer, "|Source_task: ");
+                      strcat(buffer, my_itoa(cat,  recv_msg.source_task));
+                      strcat(buffer, "|Message_type: ");
+                      strcat(buffer, my_itoa(cat,  recv_msg.type));
+                      strcat(buffer, "|Msg_rqst_type:  ");
+                      strcat(buffer, my_itoa(cat,  recv_msg.msg_rqst_type));
+                      strcat(buffer, "|Data: ");
+                      strcat(buffer, my_itoa(cat,  recv_msg.data));
+                      strcat(buffer, "\n");
+
+                      msg_len = strlen(buffer);
+                      //UARTprintf("string is %s", buffer);
+                      UARTSend((uint8_t*)buffer, msg_len);
             }
         }
 #endif
@@ -1382,6 +1589,12 @@ int main(void)
     xTaskCreate(notifyTask, (const portCHAR *)"notify",
                 configMINIMAL_STACK_SIZE, NULL, 1, &notifyHandle);
 
+   // xTaskCreate(testTask, (const portCHAR *)"test",
+                //configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+
+#ifdef UNIT
+    unit();
+#endif
     //
     // Enable processor interrupts.
     //
