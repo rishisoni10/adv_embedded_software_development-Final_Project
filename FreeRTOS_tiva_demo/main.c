@@ -1,13 +1,22 @@
-/* APES Project_2 FreeRTOS and TivaWare test code
- *
- * main.c
- *
- * Rishi Soni & Snehal Sanghvi
- *
- * This is a simple demonstration project of FreeRTOS 8.2 on the Tiva Launchpad
- * EK-TM4C1294XL.  TivaWare driverlib sourcecode is included.
- */
-
+/******************************************************
+*   File: main.c
+*
+​* ​ ​ The MIT License (MIT)
+*   Copyright (C) 2017 by Snehal Sanghvi and Rishi Soni
+*   Redistribution,​ ​ modification​ ​ or​ ​ use​ ​ of​ ​ this​ ​ software​ ​ in​ ​ source​ ​ or​ ​ binary
+​* ​ ​ forms​ ​ is​ ​ permitted​ ​ as​ ​ long​ ​ as​ ​ the​ ​ files​ ​ maintain​ ​ this​ ​ copyright.​ ​ Users​ ​ are
+​* ​ ​ permitted​ ​ to​ ​ modify​ ​ this​ ​ and​ ​ use​ ​ it​ ​ to​ ​ learn​ ​ about​ ​ the​ ​ field​ ​ of​ ​ embedded
+​* ​ ​ software.​ ​ The authors​ and​ ​ the​ ​ University​ ​ of​ ​ Colorado​ ​ are​ ​ not​ ​ liable​ ​ for
+​* ​ ​ any​ ​ misuse​ ​ of​ ​ this​ ​ material.
+*
+*
+*   Authors: Snehal Sanghvi and Rishi Soni
+*   Date Edited: 16 Dec 2017
+*
+*   Description: Source file for Tiva & FreeRTOS
+*
+*
+********************************************************/
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
@@ -42,6 +51,7 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "queue.h"
+
 
 #define LSM6DS3_ADDR        (0x6B)
 #define TMP102_ADDR         (0x48)
@@ -324,7 +334,7 @@ void Timer0AIntHandler(void)
 
 }
 
-
+//Interrupt handler for GPIO PORTA interrupt
 void PortAIntHandler(void){
     taskDISABLE_INTERRUPTS();
     ROM_GPIOIntDisable(GPIO_PORTA_BASE, GPIO_PIN_6);
@@ -422,10 +432,7 @@ void Hibernate_Init(void)
 }
 
 
-
-
-
-//UART setup
+//Tivaware UART setup
 void UART_Init(void)
 {
     ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_UART3);
@@ -451,6 +458,8 @@ void UART_Init(void)
     ROM_UARTIntEnable(UART3_BASE, UART_INT_RX | UART_INT_RT);
 }
 
+
+//GPIO setup
 void GPIO_Init(void)
 {
     //PortB for GPIO r/w
@@ -485,6 +494,7 @@ void GPIO_Init(void)
     ROM_GPIOIntEnable(GPIO_PORTA_BASE, GPIO_PIN_6);     // Enable interrupt for PF4
 }
 
+//Timer setup for generating an interrupt every 30 seconds
 #ifdef PULSE
 void Timer_Init(void)
 {
@@ -508,6 +518,8 @@ void Timer_Init(void)
 
 }
 
+
+//Analog Comparator setup
 void Comparator_Init(void)
 {
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);        //enable PortC
@@ -581,6 +593,7 @@ void Peripheral_Int(void)
 }
 #endif
 
+//I2C2 setup
 #ifdef PEDOMETER
 void I2C_Init(void)
 {
@@ -627,6 +640,8 @@ void I2C_Init(void)
     ROM_I2CMasterInitExpClk(I2C1_BASE, SYSTEM_CLOCK, true);     //400kbps
 }
 
+
+//Callback function for the pedometer task
 void pedometerTask(void *pvParameters)
 {
     uint8_t ctrl9_xl;
@@ -894,7 +909,7 @@ void pedometerTask(void *pvParameters)
 
             //UARTprintf("ISR count is %d\n\n", isr_counter);
 
-
+            //Code block for requesting data from pulse rate task
             if(count%15==0){
                 send_pulse_msg.source_task = pedometer;
                 send_pulse_msg.log_level = LOG_REQUEST;
@@ -922,6 +937,7 @@ void pedometerTask(void *pvParameters)
 
             //memset(&send_pulse_msg, 0, sizeof(send_pulse_msg));
 
+            //Code block for receiving requested data from pulse rate task
             status_recv_pulseQueue = xQueueReceive(sharedQueue2, &recv_pulse_msg, 50);
             if(status_recv_pulseQueue == pdPASS){
                 if(recv_pulse_msg.source_task == pulse_rate ){
@@ -962,7 +978,7 @@ void pedometerTask(void *pvParameters)
             //TODO : Figure out timestamps
 
 
-            //sending the data to the socket task using queue
+            //sending the data to the serial task using queue
             status_pedQueue = xQueueSendToBack(pedQueue, &ped_msg, 50);
             if(status_pedQueue != pdPASS){
                 UARTprintf("Could not send data to pedometer queue.\n");
@@ -1007,6 +1023,7 @@ void pulseTask(void *pvParameters)
 
         //UARTprintf("Current BPM is:%d\n", bpm_cpy);
 
+        //Code block for requesting data from pedometer task after every 25 iterations: inter-task communication
         if(count1%25==0){
             send_ped_msg.source_task = pulse_rate;
             send_ped_msg.log_level = LOG_REQUEST;
@@ -1034,6 +1051,7 @@ void pulseTask(void *pvParameters)
 
         //memset(&send_ped_msg, 0, sizeof(send_ped_msg));
 
+        //Code block for receiving requested data from pedometer task: Inter-Task communication
         status_recv_pedQueue = xQueueReceive(sharedQueue1, &recv_ped_msg, 50);
         if(status_recv_pedQueue == pdPASS){
             if(recv_ped_msg.source_task == pedometer ){
@@ -1063,7 +1081,7 @@ void pulseTask(void *pvParameters)
             }
             //memset(&recv_ped_msg, 0, sizeof(recv_ped_msg));
         }
-
+        //Getting the current BPM value and sending it in the queue
         pulse_msg.data = bpm_cpy;
         pulse_msg.source_task = pulse_rate;
         pulse_msg.log_level = LOG_INFO_DATA;
@@ -1085,6 +1103,7 @@ void pulseTask(void *pvParameters)
 }
 #endif
 
+//Task created during project demo
 void testTask(void *pvParameters){
     //instanting the message packet
     static message test_msg;
@@ -1110,7 +1129,7 @@ void testTask(void *pvParameters){
     }
 }
 
-
+//Unit test task
 void unit(void){
     int status = 0;
 
@@ -1213,7 +1232,7 @@ void unit(void){
     UARTprintf("Fail tests: %d\n", fail_tests);
 }
 
-
+//This task sends data to the server through a serial (UART) connection
 #ifdef SERIAL
 void serialTask(void *pvParameters)
 {
@@ -1241,6 +1260,7 @@ void serialTask(void *pvParameters)
             if(recv_msg.source_task == pedometer ){
                 if(recv_msg.log_level == LOG_INFO_DATA && recv_msg.type == LOG_MESSAGE){
                     //UARTprintf("Source: pedometer task. Step count is %d\n", recv_msg.data);
+                    //Creating the message string for sending to the server
                     memset(buffer, 0, sizeof(buffer));
                     strcpy(buffer, "Log_level: ");
                     strcat(buffer, my_itoa(cat,  recv_msg.log_level));
@@ -1261,7 +1281,7 @@ void serialTask(void *pvParameters)
                 }
                 else if(recv_msg.type == REQUEST_MESSAGE){
                     UARTprintf("A request message from pulse rate task to pedometer task.\n");
-
+                    //Creating the message string for sending to the server
                     memset(buffer, 0, sizeof(buffer));
                     strcpy(buffer, "Log_level: ");
                     strcat(buffer, my_itoa(cat,  recv_msg.log_level));
@@ -1284,7 +1304,7 @@ void serialTask(void *pvParameters)
             else if(recv_msg.source_task == main_t ){
                 if(recv_msg.msg_rqst_type == PED_STARTUP){
                       UARTprintf("Source: main task. Pedometer task is spawned\n");
-
+                      //Creating the message string for sending to the server
                       memset(buffer, 0, sizeof(buffer));
                       strcpy(buffer, "Log_level: ");
                       strcat(buffer, my_itoa(cat,  recv_msg.log_level));
@@ -1306,7 +1326,7 @@ void serialTask(void *pvParameters)
             }
             else if(recv_msg.source_task == test_t ){
                       UARTprintf("Source: main task. Feature task sent a msg.\n");
-
+                      //Creating the message string for sending to the server
                       memset(buffer, 0, sizeof(buffer));
                       strcpy(buffer, "Log_level: ");
                       strcat(buffer, my_itoa(cat,  recv_msg.log_level));
@@ -1338,6 +1358,7 @@ void serialTask(void *pvParameters)
 
                 if(recv_msg.msg_rqst_type == PULSE_STARTUP){
                     UARTprintf("Source: main task. Pulse task is spawned\n");
+                    //Creating the message string for sending to the server
                     memset(buffer, 0, sizeof(buffer));
                     strcpy(buffer, "Log_level: ");
                     strcat(buffer, my_itoa(cat,  recv_msg.log_level));
@@ -1358,6 +1379,7 @@ void serialTask(void *pvParameters)
                 }
                 else if(recv_msg.log_level == LOG_INFO_DATA){
                     //UARTprintf("Source: pulse task. BPM received from queue: %d\n\n", recv_msg.data);
+                    //Creating the message string for sending to the server
                     memset(buffer, 0, sizeof(buffer));
                     strcpy(buffer, "Log_level: ");
                     strcat(buffer, my_itoa(cat,  recv_msg.log_level));
@@ -1378,6 +1400,7 @@ void serialTask(void *pvParameters)
                 }
                 else if(recv_msg.type == REQUEST_MESSAGE){
                     UARTprintf("A request message from pedometer task to pulse rate task.\n");
+                    //Creating the message string for sending to the server
                     memset(buffer, 0, sizeof(buffer));
                     strcpy(buffer, "Log_level: ");
                     strcat(buffer, my_itoa(cat,  recv_msg.log_level));
@@ -1400,7 +1423,7 @@ void serialTask(void *pvParameters)
             else if(recv_msg.source_task == main_t){
                 if(recv_msg.msg_rqst_type == PULSE_STARTUP){
                       UARTprintf("Source: main task. Pulse task is spawned\n");
-
+                      //Creating the message string for sending to the server
                       memset(buffer, 0, sizeof(buffer));
                       strcpy(buffer, "Log_level: ");
                       strcat(buffer, my_itoa(cat,  recv_msg.log_level));
@@ -1426,7 +1449,7 @@ void serialTask(void *pvParameters)
 }
 #endif
 
-
+//Task created during project demo
 void notifyTask(void *pvParameters)
 {
     const TickType_t xMaxBlockTime = pdMS_TO_TICKS( 500 );
@@ -1482,7 +1505,7 @@ void __error__(char *pcFilename, uint32_t ui32Line)
 }
 
 
-// Main function
+// Main function which spawns the FreeRTOS tasks
 int main(void)
 {
     static message main_msg;
@@ -1513,6 +1536,8 @@ int main(void)
     ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPION);
     ROM_GPIOPinTypeGPIOOutput(GPIO_PORTN_BASE, GPIO_PIN_0);
 
+
+/*Setting up the on - board peripherals*/
     UART_Init();
 
 #ifdef  PEDOMETER
@@ -1525,6 +1550,7 @@ int main(void)
     Comparator_Init();
     Hibernate_Init();
 #endif
+/*End of peripheral setup*/
 
     //creating the shared queues
     sharedQueue1 = xQueueCreate(10, sizeof(message));
@@ -1538,7 +1564,7 @@ int main(void)
     xTaskCreate(pedometerTask, (const portCHAR *)"pedometer",
                   configMINIMAL_STACK_SIZE, NULL, 2, NULL);
 
-
+    //creating a "task initialization" message to be sent to the server
      main_msg.source_task = main_t;
      main_msg.log_level = LOG_MODULE_STARTUP;
      main_msg.msg_rqst_type = PED_STARTUP;
@@ -1563,7 +1589,7 @@ int main(void)
     xTaskCreate(pulseTask, (const portCHAR *)"pulse",
                 configMINIMAL_STACK_SIZE, NULL, 2, NULL);
 
-
+    //creating a "task initialization" message to be sent to the server
     main_msg.source_task = main_t;
     main_msg.log_level = LOG_MODULE_STARTUP;
     main_msg.msg_rqst_type = PULSE_STARTUP;
@@ -1581,11 +1607,12 @@ int main(void)
 
 #endif
 
+//Creating the serial task
 #ifdef SERIAL
     xTaskCreate(serialTask, (const portCHAR *)"serial",
                 configMINIMAL_STACK_SIZE, NULL, 1, NULL);
 #endif
-
+//Task created during project demo
     xTaskCreate(notifyTask, (const portCHAR *)"notify",
                 configMINIMAL_STACK_SIZE, NULL, 1, &notifyHandle);
 
